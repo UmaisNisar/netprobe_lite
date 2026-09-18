@@ -17,6 +17,7 @@ function summarise(result, settings) {
   const latency = average(stats.map((s) => s.latency));
   const loss = average(stats.map((s) => s.loss));
   const jitter = average(stats.map((s) => s.jitter));
+  const p95 = average(stats.map((s) => s.p95));
 
   // The original looked up the server literally named "My_DNS_Server" and
   // crashed if it was renamed; here the home server is chosen by flag.
@@ -39,6 +40,7 @@ function summarise(result, settings) {
     latency,
     loss,
     jitter,
+    p95,
     dnsLatency,
   };
 }

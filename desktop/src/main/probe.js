@@ -1,13 +1,16 @@
 // Network probe: ping loss/latency/jitter per site and DNS response time per
 // nameserver. Port of helpers/network_helper.py that works on Windows, macOS
-// and Linux without admin rights by driving the OS ping binary.
+// and Linux without admin rights: native ICMP on Windows (icmp.js), the OS
+// ping binary everywhere else and as a fallback.
 
 const childProcess = require('node:child_process');
+const crypto = require('node:crypto');
 const { Resolver } = require('node:dns').promises;
 const { performance } = require('node:perf_hooks');
+const icmp = require('./icmp');
 
-// Swappable in tests.
-const deps = { spawn: childProcess.spawn, platform: process.platform };
+// Swappable in tests. `native` returns null when unavailable.
+const deps = { spawn: childProcess.spawn, platform: process.platform, native: icmp.pingSequences };
 
 // Reply lines carry the RTT as "time=12ms" (Windows), "time<1ms" (Windows,
 // sub-millisecond) or "time=12.3 ms" (Unix). The keyword is localised on
@@ -75,18 +78,31 @@ function jitterOf(sequences) {
 
 const round = (n, d = 2) => (n == null ? null : Math.round(n * 10 ** d) / 10 ** d);
 
+// Linear-interpolated percentile of an unsorted list (p in 0..100).
+function percentile(values, p) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const rank = (p / 100) * (sorted.length - 1);
+  const lo = Math.floor(rank);
+  const hi = Math.ceil(rank);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (rank - lo);
+}
+
 // Ping binaries send roughly one packet per second without root, so the
 // requested count is split across parallel ping processes to finish within
 // a few seconds instead of `count` seconds.
+async function binaryPings(site, count, streams) {
+  const perStream = Math.ceil(count / streams);
+  const runs = await Promise.all(Array.from({ length: streams }, () => runPing(site, perStream, 1000)));
+  return { sent: runs.reduce((n, r) => n + r.sent, 0), rtts: runs.map((r) => r.rtts) };
+}
+
 async function pingSite(site, count, parallel = 5) {
   const streams = Math.max(1, Math.min(parallel, count));
-  const perStream = Math.ceil(count / streams);
-  const runs = await Promise.all(
-    Array.from({ length: streams }, () => runPing(site, perStream, 1000))
-  );
+  const native = deps.native ? await deps.native(site, count, { streams }) : null;
+  const { sent, rtts: sequences } = native ?? (await binaryPings(site, count, streams));
 
-  const sent = runs.reduce((n, r) => n + r.sent, 0);
-  const rtts = runs.flatMap((r) => r.rtts);
+  const rtts = sequences.flat();
   const received = rtts.length;
   const loss = sent ? ((sent - received) / sent) * 100 : 100;
   const latency = received ? rtts.reduce((a, b) => a + b, 0) / received : null;
@@ -95,26 +111,61 @@ async function pingSite(site, count, parallel = 5) {
     site,
     latency: round(latency),
     loss: round(loss),
-    jitter: received > 1 ? round(jitterOf(runs.map((r) => r.rtts))) : null,
+    jitter: received > 1 ? round(jitterOf(sequences)) : null,
+    p50: round(percentile(rtts, 50)),
+    p95: round(percentile(rtts, 95)),
+    p99: round(percentile(rtts, 99)),
   };
 }
 
 const DNS_FAIL_MS = 5000; // Same penalty value the original used for failures.
 
+// "Not found" answers are still answers: the resolver did its job.
+const ANSWERED = new Set(['ENOTFOUND', 'ENODATA']);
+
+async function timeLookup(resolver, name, acceptNotFound) {
+  const start = performance.now();
+  try {
+    await resolver.resolve4(name);
+  } catch (e) {
+    if (!(acceptNotFound && ANSWERED.has(e.code))) return null;
+  }
+  return round(performance.now() - start);
+}
+
+// Two lookups per server: `site` (almost always cached, the original
+// metric that feeds the score) and a random subdomain of it, which no
+// resolver can have cached, so it measures a full recursive lookup.
 async function dnsTest(site, server, timeoutMs = 5000) {
+  const fail = { name: server.name, ip: server.ip, latency: DNS_FAIL_MS, ok: false, uncached: null };
   const resolver = new Resolver({ timeout: timeoutMs, tries: 1 });
   try {
     resolver.setServers([server.ip]);
   } catch {
-    return { name: server.name, ip: server.ip, latency: DNS_FAIL_MS, ok: false };
+    return fail;
   }
-  const start = performance.now();
-  try {
-    await resolver.resolve4(site);
-    return { name: server.name, ip: server.ip, latency: round(performance.now() - start), ok: true };
-  } catch {
-    return { name: server.name, ip: server.ip, latency: DNS_FAIL_MS, ok: false };
+  const cached = await timeLookup(resolver, site, false);
+  if (cached == null) return fail;
+  const random = `np-${crypto.randomBytes(6).toString('hex')}.${site}`;
+  const uncached = await timeLookup(resolver, random, true);
+  return { name: server.name, ip: server.ip, latency: cached, ok: true, uncached };
+}
+
+// Pings `target` back to back until `until` settles; returns every RTT.
+// Used for latency under load during speed tests (bufferbloat).
+async function sampleLatency(target, until) {
+  let done = false;
+  until.then(
+    () => (done = true),
+    () => (done = true)
+  );
+  const rtts = [];
+  while (!done) {
+    const native = deps.native ? await deps.native(target, 5, { streams: 1, spacingMs: 100 }) : null;
+    if (native) rtts.push(...native.rtts.flat());
+    else rtts.push(...(await runPing(target, 1, 1000)).rtts);
   }
+  return rtts;
 }
 
 // Pings along the path (your router, then the ISP's first router) use a
@@ -124,7 +175,7 @@ const PATH_PINGS = 20;
 async function pingHop(ip, count) {
   if (!ip) return null;
   const r = await pingSite(ip, Math.min(PATH_PINGS, count));
-  return { ip, latency: r.latency, loss: r.loss, jitter: r.jitter };
+  return { ip, latency: r.latency, loss: r.loss, jitter: r.jitter, p95: r.p95 };
 }
 
 // `path` is { gateway, isp } IPs (either may be null); `dnsServers`
@@ -140,4 +191,6 @@ async function collect(settings, { path = {}, dnsServers = settings.dnsServers }
   return { stats, dns, path: { gateway, isp } };
 }
 
-module.exports = { collect, pingSite, pingHop, runPing, dnsTest, parseRtts, jitterOf, deps, DNS_FAIL_MS, PATH_PINGS };
+module.exports = {
+  collect, pingSite, pingHop, runPing, dnsTest, sampleLatency, parseRtts, jitterOf, percentile, deps, DNS_FAIL_MS, PATH_PINGS,
+};

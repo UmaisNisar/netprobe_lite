@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+  <title>Netprobe report</title>
+  <link rel="stylesheet" href="../../node_modules/uplot/dist/uPlot.min.css">
+  <style>
+    @page { size: A4; margin: 14mm 12mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #151922; background: #fff; font: 11px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif; }
+    h1 { font-size: 20px; margin: 0; }
+    h2 { font-size: 13px; margin: 18px 0 6px; padding-bottom: 4px; border-bottom: 1px solid #d9dde6; }
+    .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .head img { width: 34px; height: 34px; border-radius: 7px; }
+    .brand { display: flex; gap: 10px; align-items: center; }
+    .muted { color: #5f6878; }
+    .findings { margin: 10px 0 0; padding: 10px 12px 10px 26px; background: #f4f6fa; border-radius: 8px; }
+    .findings li { margin: 2px 0; }
+    .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
+    .tile { border: 1px solid #e1e5ee; border-radius: 8px; padding: 8px 10px; }
+    .tile .k { color: #5f6878; font-size: 10px; }
+    .tile .v { font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; }
+    .tile .s { color: #5f6878; font-size: 10px; }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th { text-align: left; color: #5f6878; font-weight: 600; font-size: 10px; padding: 4px 6px; border-bottom: 1px solid #d9dde6; }
+    td { padding: 4px 6px; border-bottom: 1px solid #eef0f5; }
+    tr { break-inside: avoid; }
+    .bad { color: #c62d2a; font-weight: 600; }
+    .warn { color: #a36f00; }
+    .chart { margin-top: 4px; break-inside: avoid; }
+    .chart h3 { font-size: 11px; margin: 8px 0 2px; color: #5f6878; }
+    .note { font-size: 10px; color: #5f6878; margin-top: 14px; }
+    .u-legend { font-size: 10px; }
+    section { break-inside: auto; }
+  </style>
+</head>
+<body>
+  <div class="head">
+    <div class="brand">
+      <img src="../../assets/icon.png" alt="">
+      <div>
+        <h1>Internet connection report</h1>
+        <div class="muted" id="period"></div>
+      </div>
+    </div>
+    <div class="muted" style="text-align:right" id="generated"></div>
+  </div>
+
+  <ul class="findings" id="findings"></ul>
+  <div class="tiles" id="tiles"></div>
+
+  <section>
+    <h2>Over time</h2>
+    <div class="chart"><h3>Internet Quality Score (%)</h3><div id="c-score"></div></div>
+    <div class="chart"><h3>Latency (ms): median and 95th percentile</h3><div id="c-latency"></div></div>
+    <div class="chart"><h3>Packet loss (%)</h3><div id="c-loss"></div></div>
+  </section>
+
+  <section>
+    <h2>Incidents</h2>
+    <table>
+      <thead><tr><th>Started</th><th>Ended</th><th>Duration</th><th>Type</th><th>Likely cause</th><th>Worst loss</th><th>Connection</th></tr></thead>
+      <tbody id="incidents"></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Day by day</h2>
+    <table>
+      <thead><tr><th>Day</th><th>Uptime</th><th>Outage time</th><th>Incidents</th><th>Median latency</th><th>Avg loss</th><th>Avg score</th><th>Probes</th></tr></thead>
+      <tbody id="daily"></tbody>
+    </table>
+  </section>
+
+  <section id="speed-section">
+    <h2>Speed tests</h2>
+    <table>
+      <thead><tr><th>Time</th><th>Download</th><th>Upload</th><th>% of plan</th><th>Idle latency</th><th>Under load</th><th>Bufferbloat</th></tr></thead>
+      <tbody id="speeds"></tbody>
+    </table>
+  </section>
+
+  <p class="note" id="method"></p>
+
+  <script src="../../node_modules/uplot/dist/uPlot.iife.min.js"></script>
+  <script src="lib.js"></script>
+  <script src="report.js"></script>
+</body>
+</html>

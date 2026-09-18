@@ -163,3 +163,36 @@ test('systemDns returns a non-loopback IPv4 address', () => {
   assert.match(ip, /^\d+\.\d+\.\d+\.\d+$/);
   assert.ok(!ip.startsWith('127.'));
 });
+
+// ------------------------------------------------------------ 1.2 additions
+
+const { normaliseTime } = require('../src/main/settings');
+
+test('speed test schedule, plan and budget defaults', () => {
+  const d = defaults();
+  assert.strictEqual(d.speedtestSchedule, 'interval');
+  assert.deepStrictEqual(d.speedtestTimes, ['08:00', '20:00']);
+  assert.strictEqual(d.speedtestBudgetGB, 0);
+  assert.strictEqual(d.planDown, 0);
+  assert.strictEqual(d.planUp, 0);
+});
+
+test('times of day are normalised, de-duplicated and sorted', () => {
+  assert.strictEqual(normaliseTime('8:5'), '08:05');
+  assert.strictEqual(normaliseTime('23:59'), '23:59');
+  assert.strictEqual(normaliseTime('24:00'), null);
+  assert.strictEqual(normaliseTime('12:60'), null);
+  assert.strictEqual(normaliseTime('noon'), null);
+  const s = validate({ ...defaults(), speedtestTimes: '20:00, 8:5 x 20:00, 25:00' });
+  assert.deepStrictEqual(s.speedtestTimes, ['08:05', '20:00']);
+  assert.deepStrictEqual(validate({ ...defaults(), speedtestTimes: ['nope'] }).speedtestTimes, ['08:00', '20:00']);
+});
+
+test('schedule, plan and budget are validated', () => {
+  const s = validate({ ...defaults(), speedtestSchedule: 'hourly', planDown: -5, planUp: 'x', speedtestBudgetGB: 50 });
+  assert.strictEqual(s.speedtestSchedule, 'interval');
+  assert.strictEqual(s.planDown, 0);
+  assert.strictEqual(s.planUp, 0);
+  assert.strictEqual(s.speedtestBudgetGB, 50);
+  assert.strictEqual(validate({ ...defaults(), speedtestSchedule: 'times' }).speedtestSchedule, 'times');
+});

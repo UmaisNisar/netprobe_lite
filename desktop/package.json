@@ -1,7 +1,7 @@
 {
   "name": "netprobe-desktop",
   "productName": "Netprobe",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Monitor your home internet quality (latency, loss, jitter, DNS, bandwidth) from the system tray. Desktop port of netprobe_lite, no Docker needed.",
   "main": "src/main/main.js",
   "author": "Umais Nisar",
@@ -20,6 +20,7 @@
     "dist:linux": "electron-builder --linux"
   },
   "dependencies": {
+    "koffi": "^2.16.3",
     "uplot": "^1.6.32"
   },
   "devDependencies": {
@@ -38,7 +39,10 @@
     "files": [
       "src/**/*",
       "assets/**/*",
-      "package.json"
+      "package.json",
+      "!node_modules/koffi/build/koffi/!(win32_x64|win32_arm64)/**",
+      "!node_modules/koffi/{src,vendor,doc}/**",
+      "!node_modules/koffi/build/koffi/*/*.{exp,lib,pdb}"
     ],
     "icon": "assets/icon.png",
     "win": {
@@ -77,7 +81,10 @@
         }
       ],
       "category": "public.app-category.utilities",
-      "artifactName": "Netprobe-mac-${arch}.${ext}"
+      "artifactName": "Netprobe-mac-${arch}.${ext}",
+      "files": [
+        "!node_modules/koffi/**"
+      ]
     },
     "linux": {
       "target": [
@@ -89,7 +96,10 @@
         }
       ],
       "category": "Network",
-      "artifactName": "Netprobe-linux.${ext}"
+      "artifactName": "Netprobe-linux.${ext}",
+      "files": [
+        "!node_modules/koffi/**"
+      ]
     },
     "dmg": {
       "title": "Netprobe ${version}"

@@ -57,11 +57,12 @@ app.whenReady().then(async () => {
     uplot: typeof window.uPlot === 'function',
     gauge: !!document.querySelector('#gauge-fill'),
     charts: document.querySelectorAll('.chart').length,
-    netBanner: !!document.querySelector('#net-banner'),
+    connChip: !!document.querySelector('#conn-chip'),
     path: document.querySelectorAll('.path .node').length,
+    exportDialog: !!document.querySelector('#export-form'),
   })`);
   log('ui', JSON.stringify(ui));
-  if (!ui.lib || !ui.bridge || !ui.uplot || !ui.gauge || !ui.netBanner || ui.path !== 4 || ui.charts !== 7) {
+  if (!ui.lib || !ui.bridge || !ui.uplot || !ui.gauge || !ui.connChip || !ui.exportDialog || ui.path !== 4 || ui.charts !== 7) {
     clearTimeout(timer);
     return finish(1, 'FAIL: dashboard did not initialise');
   }
@@ -87,6 +88,20 @@ app.whenReady().then(async () => {
   clearTimeout(timer);
   if (history.runs.length < 1) return finish(1, 'FAIL: probe was not stored');
   if (!rendered) return finish(1, 'FAIL: dashboard did not render the probe');
+  // Render the PDF report the same way the Export button does.
+  const { Store } = require('../src/main/db');
+  const { Settings } = require('../src/main/settings');
+  const report = require('../src/main/report');
+  const store = new Store(dir);
+  const data = report.buildReport(store, { from: Date.now() - 3600_000, to: Date.now() + 1, settings: new Settings(dir).get() });
+  store.close();
+  const page = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true } });
+  await page.loadFile(require('node:path').join(__dirname, '..', 'src', 'renderer', 'report.html'));
+  await page.webContents.executeJavaScript(`window.renderReport(${JSON.stringify(data)})`);
+  const pdf = await page.webContents.printToPDF({ pageSize: 'A4', printBackground: true });
+  page.destroy();
+  log('report', JSON.stringify({ findings: data.findings.length, pdfBytes: pdf.length }));
+  if (pdf.subarray(0, 4).toString() !== '%PDF' || pdf.length < 10_000) return finish(1, 'FAIL: PDF report did not render');
   if (errors.length) return finish(1, 'FAIL: renderer logged errors');
   finish(0, 'PASS');
 });

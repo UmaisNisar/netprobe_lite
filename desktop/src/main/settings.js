@@ -62,9 +62,13 @@ function defaults({ detectDns = false } = {}) {
     thresholds: { loss: 5, latency: 100, jitter: 30, dnsLatency: 100 },
     speedtestEnabled: false,
     speedtestInterval: 937, // seconds; a prime to avoid colliding with probes
+    speedtestSchedule: 'interval', // 'interval' | 'times'
+    speedtestTimes: ['08:00', '20:00'], // local times for the 'times' schedule
+    speedtestBudgetGB: 0, // monthly cap on data used by scheduled tests; 0 = none
+    planDown: 0, // your plan's download speed in Mbps; 0 = not set
+    planUp: 0,
     retentionDays: 30,
     openAtLogin: true,
-    wifiWarning: true, // show the "you're on Wi-Fi" banner
     alerts: {
       notify: true, // OS notification when an incident starts / ends
       degradedScore: 0.6, // a probe below this score counts as degraded
@@ -115,6 +119,16 @@ const clamp = (n, lo, hi, fallback) => {
   return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
 };
 
+// "8:5" / "08:05" / "20:00" -> "HH:MM"; anything else -> null.
+function normaliseTime(t) {
+  const m = String(t).trim().match(/^(\d{1,2}):(\d{1,2})$/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) return null;
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
+
 function validate(s) {
   const d = defaults();
   s.sites = (s.sites || []).map((x) => String(x).trim()).filter(Boolean).slice(0, 20);
@@ -139,12 +153,22 @@ function validate(s) {
   s.probeInterval = clamp(s.probeInterval, 15, 3600, d.probeInterval);
   s.pingCount = Math.round(clamp(s.pingCount, 5, 200, d.pingCount));
   s.speedtestInterval = clamp(s.speedtestInterval, 300, 86400, d.speedtestInterval);
+  s.speedtestSchedule = s.speedtestSchedule === 'times' ? 'times' : 'interval';
+  s.speedtestTimes = [...new Set((Array.isArray(s.speedtestTimes) ? s.speedtestTimes : String(s.speedtestTimes ?? '').split(/[\s,]+/))
+    .map(normaliseTime)
+    .filter(Boolean))]
+    .sort()
+    .slice(0, 24);
+  if (!s.speedtestTimes.length) s.speedtestTimes = d.speedtestTimes;
+  s.speedtestBudgetGB = clamp(s.speedtestBudgetGB, 0, 100000, 0);
+  s.planDown = clamp(s.planDown, 0, 100000, 0);
+  s.planUp = clamp(s.planUp, 0, 100000, 0);
   s.retentionDays = Math.round(clamp(s.retentionDays, 1, 365, d.retentionDays));
   for (const k of Object.keys(d.weights)) s.weights[k] = clamp(s.weights[k], 0, 1, d.weights[k]);
   for (const k of Object.keys(d.thresholds)) s.thresholds[k] = clamp(s.thresholds[k], 0.1, 100000, d.thresholds[k]);
   s.speedtestEnabled = !!s.speedtestEnabled;
   s.openAtLogin = !!s.openAtLogin;
-  s.wifiWarning = !!s.wifiWarning;
+  delete s.wifiWarning; // setting removed in 1.2 (no more banner)
   s.alerts = {
     notify: !!s.alerts?.notify,
     degradedScore: clamp(s.alerts?.degradedScore, 0, 1, d.alerts.degradedScore),
@@ -153,4 +177,4 @@ function validate(s) {
   return s;
 }
 
-module.exports = { Settings, defaults, validate, systemDns, deps };
+module.exports = { Settings, defaults, validate, normaliseTime, systemDns, deps };

@@ -21,6 +21,7 @@
       <button id="btn-probe" class="btn">Probe now</button>
       <button id="btn-speed" class="btn">Speed test</button>
       <button id="btn-pause" class="btn">Pause</button>
+      <button id="btn-export" class="btn">Export report</button>
       <button id="btn-settings" class="btn btn-primary">Settings</button>
     </div>
   </header>
@@ -29,15 +30,6 @@
     <div class="incident-strip" id="incident-strip" role="alert" hidden>
       <span class="pulse-dot" aria-hidden="true"></span>
       <div><strong id="incident-title"></strong> <span id="incident-detail"></span></div>
-    </div>
-
-    <div class="banner" id="net-banner" role="status" hidden>
-      <span class="banner-icon" aria-hidden="true">!</span>
-      <div class="banner-text" id="net-banner-text"></div>
-      <div class="banner-actions">
-        <button class="btn btn-small" id="net-dismiss">Dismiss</button>
-        <button class="btn btn-ghost btn-small" id="net-never">Don't warn again</button>
-      </div>
     </div>
 
     <section class="hero">
@@ -54,7 +46,7 @@
       </div>
 
       <div class="stats">
-        <div class="card stat"><div class="card-label">Latency</div><div class="stat-value" id="s-latency">–</div><div class="stat-sub">avg to sites</div></div>
+        <div class="card stat"><div class="card-label">Latency</div><div class="stat-value" id="s-latency">–</div><div class="stat-sub" id="s-latency-sub">avg to sites</div></div>
         <div class="card stat"><div class="card-label">Packet loss</div><div class="stat-value" id="s-loss">–</div><div class="stat-sub">avg to sites</div></div>
         <div class="card stat"><div class="card-label">Jitter</div><div class="stat-value" id="s-jitter">–</div><div class="stat-sub">avg to sites</div></div>
         <div class="card stat"><div class="card-label">DNS (my server)</div><div class="stat-value" id="s-dns">–</div><div class="stat-sub" id="s-dns-sub">response time</div></div>
@@ -104,8 +96,8 @@
           <tbody id="site-rows"><tr><td colspan="4" class="muted">No data yet</td></tr></tbody>
         </table>
         <table class="targets">
-          <thead><tr><th>DNS server</th><th>IP</th><th>Response</th></tr></thead>
-          <tbody id="dns-rows"><tr><td colspan="3" class="muted">No data yet</td></tr></tbody>
+          <thead><tr><th>DNS server</th><th>IP</th><th>Cached</th><th title="A random name no resolver has cached: a full lookup">Uncached</th></tr></thead>
+          <tbody id="dns-rows"><tr><td colspan="4" class="muted">No data yet</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -170,8 +162,21 @@
         <fieldset>
           <legend>Speed test</legend>
           <label class="check"><input type="checkbox" name="speedtestEnabled"> Run speed tests automatically</label>
-          <div class="hint">Uses speed.cloudflare.com. Each test transfers up to ~1 GB on fast lines (about 200 MB at 100 Mbps). Leave off on metered connections.</div>
-          <label>Interval (minutes)<input type="number" name="speedtestIntervalMin" min="5" max="1440"></label>
+          <div class="hint">Uses speed.cloudflare.com. Each test transfers up to ~1 GB on fast lines (about 200 MB at 100 Mbps) and also measures latency under load (bufferbloat).</div>
+          <div class="row">
+            <label class="check"><input type="radio" name="speedtestSchedule" value="interval"> Every</label>
+            <label>Interval (minutes)<input type="number" name="speedtestIntervalMin" min="5" max="1440"></label>
+          </div>
+          <div class="row">
+            <label class="check"><input type="radio" name="speedtestSchedule" value="times"> At set times</label>
+            <label>Times of day<input type="text" name="speedtestTimes" placeholder="08:00, 20:00" spellcheck="false"></label>
+          </div>
+          <div class="row">
+            <label>Your plan: download (Mbps)<input type="number" name="planDown" min="0" step="any" placeholder="e.g. 500"></label>
+            <label>Your plan: upload (Mbps)<input type="number" name="planUp" min="0" step="any" placeholder="e.g. 50"></label>
+          </div>
+          <label>Monthly data budget for automatic tests (GB, 0 = no limit)<input type="number" name="speedtestBudgetGB" min="0" step="any"></label>
+          <div class="hint" id="usage-hint"></div>
         </fieldset>
 
         <fieldset>
@@ -200,7 +205,6 @@
         <fieldset>
           <legend>App</legend>
           <label class="check"><input type="checkbox" name="openAtLogin"> Start with Windows / at login (runs in the tray)</label>
-          <label class="check"><input type="checkbox" name="wifiWarning"> Warn when connected over Wi-Fi or a VPN</label>
           <label>Keep history for (days)<input type="number" name="retentionDays" min="1" max="365"></label>
           <button type="button" class="btn btn-danger btn-small" id="clear-history">Clear all history</button>
         </fieldset>
@@ -210,6 +214,34 @@
         <span class="muted" id="save-msg"></span>
         <button type="button" class="btn" id="settings-cancel">Cancel</button>
         <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="export" class="modal">
+    <form id="export-form" method="dialog">
+      <h2>Export report</h2>
+      <p class="hint">A PDF report is ready to send to your ISP: headline findings, uptime, outages with likely causes, charts, a day-by-day table and speed tests. CSV gives you the raw measurements.</p>
+      <label>Period
+        <select name="range">
+          <option value="86400000">Last 24 hours</option>
+          <option value="604800000" selected>Last 7 days</option>
+          <option value="2592000000">Last 30 days</option>
+          <option value="custom">Custom…</option>
+        </select>
+      </label>
+      <div class="row" id="export-custom" hidden>
+        <label>From<input type="date" name="from"></label>
+        <label>To<input type="date" name="to"></label>
+      </div>
+      <div class="row">
+        <label class="check"><input type="radio" name="format" value="pdf" checked> PDF report</label>
+        <label class="check"><input type="radio" name="format" value="csv"> CSV data</label>
+      </div>
+      <div class="modal-foot">
+        <span class="muted" id="export-msg"></span>
+        <button type="button" class="btn" id="export-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="export-go">Export</button>
       </div>
     </form>
   </dialog>

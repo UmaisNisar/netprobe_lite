@@ -112,3 +112,51 @@ test('HttpError keeps the status code', () => {
   assert.strictEqual(new HttpError('Download', 503).status, 503);
   assert.match(new HttpError('Upload', 503).message, /^Upload failed/);
 });
+
+// ------------------------------------------------------------ 1.2 additions
+
+const { median } = require('../src/main/speedtest');
+
+test('reports bytes used by both directions', async () => {
+  const { fetch, calls } = fakeFetch({ chunk: MB, delayMs: 1 });
+  const r = await run({ durationMs: 5000, streams: 1, maxBytes: 3 * MB, requestBytes: 3 * MB, fetch });
+  assert.ok(r.bytes >= 3 * MB && r.bytes <= 3 * MB + calls.upBytes, `bytes ${r.bytes}`);
+  assert.strictEqual(r.idleLatency, null, 'no latency sampling without a sampler');
+});
+
+test('samples latency idle and under load in each direction (bufferbloat)', async () => {
+  const { fetch } = fakeFetch();
+  const phases = [];
+  let call = 0;
+  // Idle ~10 ms, download ~40 ms, upload ~90 ms.
+  const sampleLatency = async (until) => {
+    const base = [10, 40, 90][call++];
+    phases.push(base);
+    await until;
+    return [base, base + 2, base - 2];
+  };
+  const r = await run({ ...fast, fetch, sampleLatency, idleMs: 20 });
+  assert.deepStrictEqual(phases, [10, 40, 90]);
+  assert.strictEqual(r.idleLatency, 10);
+  assert.strictEqual(r.downLatency, 40);
+  assert.strictEqual(r.upLatency, 90);
+});
+
+test('a failing phase still stops the latency sampler', async () => {
+  const { fetch } = fakeFetch({ downStatus: 429 });
+  let settled = 0;
+  const sampleLatency = async (until) => {
+    await until;
+    settled++;
+    return [1];
+  };
+  await assert.rejects(run({ ...fast, fetch, sampleLatency, idleMs: 5 }), /rate-limiting/);
+  assert.strictEqual(settled, 2, 'idle + download samplers finished');
+});
+
+test('median handles odd, even and empty lists', () => {
+  assert.strictEqual(median([3, 1, 2]), 2);
+  assert.strictEqual(median([4, 1, 3, 2]), 2.5);
+  assert.strictEqual(median([]), null);
+  assert.strictEqual(median(null), null);
+});

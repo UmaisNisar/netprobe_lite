@@ -94,3 +94,25 @@ test('segment and uptime texts', () => {
   assert.strictEqual(uptimeText({ uptime: 0.9 }), '90.0%');
   assert.ok(LOCATIONS.home && LOCATIONS.isp);
 });
+
+const { bloatGrade, planShare } = require('../src/renderer/lib');
+
+test('bufferbloat grades use the worst direction', () => {
+  const g = (idle, down, up) => bloatGrade({ idle_latency: idle, down_latency: down, up_latency: up });
+  assert.deepStrictEqual(g(10, 12, 14), { grade: 'A+', increase: 4 });
+  assert.strictEqual(g(10, 30, 12).grade, 'A');
+  assert.strictEqual(g(10, 12, 60).grade, 'B');
+  assert.strictEqual(g(10, 150, 12).grade, 'C');
+  assert.strictEqual(g(10, 300, 12).grade, 'D');
+  assert.strictEqual(g(10, 12, 500).grade, 'F');
+  assert.strictEqual(g(10, 5, null).increase, 0, 'faster under load is not negative');
+  assert.strictEqual(bloatGrade(null), null);
+  assert.strictEqual(bloatGrade({ idle_latency: null, down_latency: 5 }), null);
+  assert.strictEqual(bloatGrade({ idle_latency: 5, down_latency: null, up_latency: null }), null);
+});
+
+test('planShare compares bits per second to a plan in Mbps', () => {
+  assert.strictEqual(planShare(250e6, 500), 0.5);
+  assert.strictEqual(planShare(250e6, 0), null);
+  assert.strictEqual(planShare(null, 500), null);
+});

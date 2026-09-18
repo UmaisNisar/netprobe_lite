@@ -103,8 +103,25 @@
     return pct >= 99.995 ? '100%' : `${pct.toFixed(pct >= 99 ? 2 : 1)}%`;
   }
 
+  // Bufferbloat grade from the worst latency increase under load, using
+  // Waveform's bufferbloat test thresholds (ms).
+  function bloatGrade(speed) {
+    if (!speed || speed.idle_latency == null) return null;
+    const loaded = [speed.down_latency, speed.up_latency].filter((v) => v != null);
+    if (!loaded.length) return null;
+    const increase = Math.max(0, Math.max(...loaded) - speed.idle_latency);
+    const grade = increase < 5 ? 'A+' : increase < 30 ? 'A' : increase < 60 ? 'B' : increase < 200 ? 'C' : increase < 400 ? 'D' : 'F';
+    return { grade, increase };
+  }
+
+  // Measured speed as a share of the plan (null when no plan is set).
+  function planShare(bps, planMbps) {
+    if (bps == null || !planMbps) return null;
+    return bps / 1e6 / planMbps;
+  }
+
   return {
     fmt, mbps, fmtMbps, timeAgo, level, scoreCaption, pivot, esc,
-    LOCATIONS, formatDuration, segmentText, uptimeText,
+    LOCATIONS, formatDuration, segmentText, uptimeText, bloatGrade, planShare,
   };
 });

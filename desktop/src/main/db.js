@@ -16,6 +16,16 @@ const RUN_COLUMNS = {
   isp_latency: 'REAL',
   isp_loss: 'REAL',
   settling: 'INTEGER', // 1 = just after wake / network change, not judged
+  p95: 'REAL', // 1.2: 95th percentile latency (avg over sites)
+};
+const SITE_COLUMNS = { p95: 'REAL' };
+const DNS_COLUMNS = { uncached: 'REAL' }; // random-subdomain (uncached) lookup
+// Speed tests: latency before and under load (bufferbloat) and data used.
+const SPEED_COLUMNS = {
+  idle_latency: 'REAL',
+  down_latency: 'REAL',
+  up_latency: 'REAL',
+  bytes: 'REAL',
 };
 
 const CONN_FILTERS = new Set(['wifi', 'wired', 'vpn', 'unknown']);
@@ -46,15 +56,20 @@ class Store {
       );
     `);
     this.#addColumns('runs', RUN_COLUMNS);
+    this.#addColumns('site_stats', SITE_COLUMNS);
+    this.#addColumns('dns_stats', DNS_COLUMNS);
+    this.#addColumns('speed', SPEED_COLUMNS);
     this.q = {
       run: this.db.prepare(`
         INSERT OR REPLACE INTO runs
           (ts, score, latency, loss, jitter, dns_latency, conn, level, location,
-           gw_latency, gw_loss, isp_latency, isp_loss, settling)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-      site: this.db.prepare('INSERT INTO site_stats VALUES (?, ?, ?, ?, ?)'),
-      dns: this.db.prepare('INSERT INTO dns_stats VALUES (?, ?, ?, ?)'),
-      speed: this.db.prepare('INSERT OR REPLACE INTO speed VALUES (?, ?, ?)'),
+           gw_latency, gw_loss, isp_latency, isp_loss, settling, p95)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      site: this.db.prepare('INSERT INTO site_stats (ts, site, latency, loss, jitter, p95) VALUES (?, ?, ?, ?, ?, ?)'),
+      dns: this.db.prepare('INSERT INTO dns_stats (ts, name, ip, latency, uncached) VALUES (?, ?, ?, ?, ?)'),
+      speed: this.db.prepare(`
+        INSERT OR REPLACE INTO speed (ts, download, upload, idle_latency, down_latency, up_latency, bytes)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`),
       incident: this.db.prepare(`
         INSERT INTO incidents (start, end, kind, location, conn, worst_score, max_loss, max_latency, probes)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -82,10 +97,10 @@ class Store {
         ts, summary.score, summary.latency, summary.loss, summary.jitter, summary.dnsLatency,
         ctx.conn ?? null, ctx.level ?? null, ctx.location ?? null,
         gw?.latency ?? null, gw?.loss ?? null, isp?.latency ?? null, isp?.loss ?? null,
-        ctx.settling ? 1 : 0
+        ctx.settling ? 1 : 0, summary.p95 ?? null
       );
-      for (const s of result.stats) this.q.site.run(ts, s.site, s.latency, s.loss, s.jitter);
-      for (const d of result.dns) this.q.dns.run(ts, d.name, d.ip, d.latency);
+      for (const s of result.stats) this.q.site.run(ts, s.site, s.latency, s.loss, s.jitter, s.p95 ?? null);
+      for (const d of result.dns) this.q.dns.run(ts, d.name, d.ip, d.latency, d.uncached ?? null);
       this.db.exec('COMMIT');
     } catch (e) {
       this.db.exec('ROLLBACK');
@@ -93,8 +108,16 @@ class Store {
     }
   }
 
-  saveSpeed(ts, { download, upload }) {
-    this.q.speed.run(ts, download, upload);
+  // r: { download, upload, idleLatency?, downLatency?, upLatency?, bytes? }
+  saveSpeed(ts, r) {
+    this.q.speed.run(
+      ts, r.download, r.upload, r.idleLatency ?? null, r.downLatency ?? null, r.upLatency ?? null, r.bytes ?? null
+    );
+  }
+
+  // Bytes used by speed tests since `sinceTs` (for the monthly data budget).
+  speedBytes(sinceTs) {
+    return this.db.prepare('SELECT COALESCE(SUM(bytes), 0) AS b FROM speed WHERE ts >= ?').get(sinceTs).b;
   }
 
   saveIncident(inc) {
@@ -155,20 +178,35 @@ class Store {
     return {
       runs: grouped(`
         SELECT ${bk} AS ts, AVG(score) AS score, AVG(latency) AS latency, AVG(loss) AS loss,
-               AVG(jitter) AS jitter, AVG(dns_latency) AS dns_latency,
+               AVG(jitter) AS jitter, AVG(dns_latency) AS dns_latency, AVG(p95) AS p95,
                AVG(gw_latency) AS gw_latency, AVG(gw_loss) AS gw_loss,
                AVG(isp_latency) AS isp_latency, AVG(isp_loss) AS isp_loss
         FROM runs WHERE ts >= ?2 ${connSql} GROUP BY 1 ORDER BY 1`),
       sites: grouped(`
-        SELECT ${bk} AS ts, site, AVG(latency) AS latency, AVG(loss) AS loss, AVG(jitter) AS jitter
+        SELECT ${bk} AS ts, site, AVG(latency) AS latency, AVG(loss) AS loss, AVG(jitter) AS jitter, AVG(p95) AS p95
         FROM site_stats WHERE ts >= ?2 ${inRuns} GROUP BY 1, 2 ORDER BY 1`),
       dns: grouped(`
-        SELECT ${bk} AS ts, name, AVG(latency) AS latency
+        SELECT ${bk} AS ts, name, AVG(latency) AS latency, AVG(uncached) AS uncached
         FROM dns_stats WHERE ts >= ?2 ${inRuns} GROUP BY 1, 2 ORDER BY 1`),
       // Speed tests are sparse (every 15+ min), so return them raw.
       speed: this.db.prepare('SELECT * FROM speed WHERE ts >= ? ORDER BY ts').all(sinceTs),
       incidents: this.incidents(sinceTs, 500).map(({ trace: _t, ...i }) => i),
     };
+  }
+
+  // Raw rows for reports and CSV export.
+  runsBetween(from, to) {
+    return this.db.prepare('SELECT * FROM runs WHERE ts >= ? AND ts < ? ORDER BY ts').all(from, to);
+  }
+
+  speedBetween(from, to) {
+    return this.db.prepare('SELECT * FROM speed WHERE ts >= ? AND ts < ? ORDER BY ts').all(from, to);
+  }
+
+  incidentsBetween(from, to) {
+    return this.db
+      .prepare('SELECT * FROM incidents WHERE start < ? AND COALESCE(end, ?) >= ? ORDER BY start')
+      .all(to, to, from);
   }
 
   latestSpeed() {
@@ -194,4 +232,4 @@ class Store {
   }
 }
 
-module.exports = { Store, RUN_COLUMNS };
+module.exports = { Store, RUN_COLUMNS, SITE_COLUMNS, DNS_COLUMNS, SPEED_COLUMNS };

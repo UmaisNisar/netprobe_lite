@@ -1,8 +1,9 @@
 'use strict';
 
 const api = window.netprobe;
-const { fmt, mbps, fmtMbps, timeAgo, level, scoreCaption, pivot, esc, LOCATIONS, formatDuration, segmentText, uptimeText } =
-  window.NetprobeLib;
+const {
+  fmt, mbps, fmtMbps, timeAgo, level, scoreCaption, pivot, esc, LOCATIONS, formatDuration, segmentText, uptimeText, bloatGrade, planShare,
+} = window.NetprobeLib;
 const $ = (sel) => document.querySelector(sel);
 
 let state = null;
@@ -12,7 +13,6 @@ let lastProbeTs = null;
 let lastSpeedTs = null;
 let connFilter = '';
 let incidents = []; // for chart bands and the incidents table
-let bannerDismissedFor = null; // "type:name" of the connection it was dismissed for
 let incidentKey = null; // refetch incidents when this changes
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -42,16 +42,12 @@ function renderConnection() {
   chip.hidden = conn.type === 'unknown';
   chip.className = `chip ${conn.type}`;
   chip.textContent = CONN_LABEL[conn.type] ?? '';
-  chip.title = conn.name ? `Internet traffic goes through: ${conn.name}` : '';
-
-  const key = `${conn.type}:${conn.name}`;
-  const warn = conn.type === 'wifi' || conn.type === 'vpn';
-  $('#net-banner').hidden = !(warn && state.settings.wifiWarning && bannerDismissedFor !== key);
-  const named = conn.name && !/^wi-?fi$/i.test(conn.name) ? ` (${esc(conn.name)})` : '';
-  $('#net-banner-text').innerHTML =
-    conn.type === 'vpn'
-      ? `<strong>A VPN is active${named}.</strong> Results measure the path through the VPN, not your ISP. Turn the VPN off for accurate ISP measurements.`
-      : `<strong>You're on Wi-Fi${named}.</strong> Results include your wireless signal and interference, not just your ISP. For ISP-only measurements, connect this computer to your router with an Ethernet cable.`;
+  const via = conn.name ? `Internet traffic goes through: ${conn.name}.` : '';
+  const why = {
+    wifi: 'On Wi-Fi, results include your wireless signal and interference, not just your ISP. Connect by cable for ISP-only measurements.',
+    vpn: 'A VPN is active: results measure the path through the VPN, not your ISP. Turn it off for accurate ISP measurements.',
+  }[conn.type];
+  chip.title = [via, why].filter(Boolean).join('\n\n');
 }
 
 function renderIncidentStrip() {
@@ -103,8 +99,10 @@ function renderPath() {
     v.className = 'verdict';
     v.textContent = 'Network just changed, settling…';
   } else if (diag.level === 'ok') {
-    v.className = 'verdict good';
-    v.textContent = 'All clear';
+    // Good enough overall, but say so if a segment of the path is struggling.
+    const slow = diag.gateway === 'bad' ? 'home' : diag.isp === 'bad' ? 'isp' : null;
+    v.className = slow ? 'verdict warn' : 'verdict good';
+    v.textContent = slow ? `Working, but ${LOCATIONS[slow].charAt(0).toLowerCase()}${LOCATIONS[slow].slice(1)} is slow` : 'All clear';
   } else {
     v.className = 'verdict bad';
     v.textContent = `${diag.level === 'outage' ? 'Outage' : 'Problems'}: ${LOCATIONS[diag.where] ?? 'unknown location'}`;
@@ -201,6 +199,7 @@ function renderState() {
 
   // Stat cards
   setValue('#s-latency', fmt(sum?.latency), 'ms', level(sum?.latency, t.latency));
+  $('#s-latency-sub').textContent = sum?.p95 != null ? `avg to sites · p95 ${fmt(sum.p95)} ms` : 'avg to sites';
   setValue('#s-loss', fmt(sum?.loss), '%', level(sum?.loss, t.loss));
   setValue('#s-jitter', fmt(sum?.jitter), 'ms', level(sum?.jitter, t.jitter));
   setValue('#s-dns', fmt(sum?.dnsLatency), 'ms', level(sum?.dnsLatency, t.dnsLatency));
@@ -212,12 +211,21 @@ function renderState() {
   setValue('#s-up', fmtMbps(sp?.upload), 'Mbps');
   let speedSub;
   if (state.speedtesting) speedSub = 'testing now…';
-  else if (state.speedError) speedSub = /429/.test(state.speedError) ? 'rate-limited, will retry' : 'last test failed';
+  else if (state.speedSkipped === 'budget') speedSub = 'paused: monthly data budget used';
+  else if (state.speedError) speedSub = /429/.test(state.speedError) ? 'rate-limited, backing off' : 'last test failed';
   else if (sp) speedSub = `tested ${timeAgo(sp.ts)}`;
   else speedSub = s.speedtestEnabled ? 'first test pending' : 'speed test off';
+  const downShare = planShare(sp?.download, s.planDown);
+  if (downShare != null && !state.speedtesting) speedSub += ` · ${Math.round(downShare * 100)}% of plan`;
   $('#s-speed-sub').textContent = speedSub;
   $('#s-speed-sub').title = state.speedError || '';
-  $('#s-speed-sub2').textContent = sp ? new Date(sp.ts).toLocaleTimeString() : ' ';
+  const bloat = bloatGrade(sp);
+  const upShare = planShare(sp?.upload, s.planUp);
+  const upParts = [];
+  if (bloat) upParts.push(`bufferbloat ${bloat.grade} (+${Math.round(bloat.increase)} ms)`);
+  if (upShare != null) upParts.push(`${Math.round(upShare * 100)}% of plan`);
+  $('#s-speed-sub2').textContent = upParts.join(' · ') || (sp ? new Date(sp.ts).toLocaleTimeString() : '\u00a0'); // keeps the card height when empty
+  $('#s-speed-sub2').title = bloat ? 'Latency increase while the connection is fully loaded. A+/A: great for calls and games; C or worse: expect lag while uploading or downloading.' : '';
 
   // Tables
   if (latest) {
@@ -236,7 +244,8 @@ function renderState() {
       return `<tr>
         <td>${esc(d.name)}${isHome ? '<span class="tag home">mine</span>' : ''}</td>
         <td class="muted">${esc(d.ip)}</td>
-        <td class="${d.ok ? level(d.latency, t.dnsLatency) : 'v-bad'}">${d.ok ? `${fmt(d.latency)} ms` : 'failed'}</td></tr>`;
+        <td class="${d.ok ? level(d.latency, t.dnsLatency) : 'v-bad'}">${d.ok ? `${fmt(d.latency)} ms` : 'failed'}</td>
+        <td class="${d.uncached != null ? level(d.uncached, t.dnsLatency * 3) : ''}">${d.uncached != null ? `${fmt(d.uncached)} ms` : '–'}</td></tr>`;
     });
     $('#dns-rows').innerHTML = dnsRows.join('');
   }
@@ -357,7 +366,13 @@ async function loadHistory() {
 
   for (const [id, field] of [['#c-latency', 'latency'], ['#c-loss', 'loss'], ['#c-jitter', 'jitter']]) {
     const p = pivot(h.sites, 'site', (r) => r[field], probeGap);
-    charts.push(makeChart($(id), { xs: p.xs, series: withAverage(p, h.runs, field, probeGap) }));
+    const series = withAverage(p, h.runs, field, probeGap);
+    if (field === 'latency') {
+      const p95 = pivot(h.runs, null, (r) => r.p95, probeGap);
+      const lookup = new Map(p95.xs.map((x, i) => [x, p95.ys[0][i]]));
+      series.push({ label: 'p95 (avg)', color: css('--muted'), width: 1.5, dash: [5, 4], data: p.xs.map((x) => lookup.get(x) ?? null) });
+    }
+    charts.push(makeChart($(id), { xs: p.xs, series }));
   }
 
   const pathRuns = (field) => pivot(h.runs, null, (r) => r[field], probeGap);
@@ -386,16 +401,14 @@ async function loadHistory() {
   const speedGap = (state?.settings.speedtestInterval ?? 937) * 1000 * 3.5;
   const down = pivot(h.speed, null, (r) => mbps(r.download), speedGap);
   const up = pivot(h.speed, null, (r) => mbps(r.upload), speedGap);
-  charts.push(
-    makeChart($('#c-speed'), {
-      xs: down.xs,
-      points: true,
-      series: [
-        { label: 'Download', color: accent, width: 2, data: down.ys[0] ?? [], digits: 0 },
-        { label: 'Upload', color: good, width: 2, data: up.ys[0] ?? [], digits: 0 },
-      ],
-    })
-  );
+  const speedSeries = [
+    { label: 'Download', color: accent, width: 2, data: down.ys[0] ?? [], digits: 0 },
+    { label: 'Upload', color: good, width: 2, data: up.ys[0] ?? [], digits: 0 },
+  ];
+  const plan = state?.settings ?? {};
+  if (plan.planDown) speedSeries.push({ label: 'Plan (down)', color: accent, width: 1, dash: [6, 4], data: down.xs.map(() => plan.planDown), digits: 0 });
+  if (plan.planUp) speedSeries.push({ label: 'Plan (up)', color: good, width: 1, dash: [6, 4], data: down.xs.map(() => plan.planUp), digits: 0 });
+  charts.push(makeChart($('#c-speed'), { xs: down.xs, points: true, series: speedSeries }));
 }
 
 // History rows carry no traces; keep the ones already loaded for the table.
@@ -436,11 +449,6 @@ $('#range').addEventListener('click', (e) => {
 $('#btn-probe').addEventListener('click', () => api.probeNow());
 $('#btn-speed').addEventListener('click', () => api.speedtestNow());
 $('#btn-pause').addEventListener('click', () => api.togglePause());
-$('#net-dismiss').addEventListener('click', () => {
-  bannerDismissedFor = `${state.connection.type}:${state.connection.name}`;
-  renderConnection();
-});
-$('#net-never').addEventListener('click', () => api.saveSettings({ ...state.settings, wifiWarning: false }));
 
 // ------------------------------------------------------------ settings
 
@@ -495,10 +503,16 @@ function openSettings() {
   syncAutoBoxes();
   form.speedtestEnabled.checked = s.speedtestEnabled;
   form.speedtestIntervalMin.value = Math.round(s.speedtestInterval / 60);
+  form.querySelector(`input[name=speedtestSchedule][value=${s.speedtestSchedule}]`).checked = true;
+  form.speedtestTimes.value = s.speedtestTimes.join(', ');
+  form.planDown.value = s.planDown || '';
+  form.planUp.value = s.planUp || '';
+  form.speedtestBudgetGB.value = s.speedtestBudgetGB;
+  const used = (state.speedUsage?.month ?? 0) / 1e9;
+  $('#usage-hint').textContent = `Speed tests have used ${used.toFixed(used < 10 ? 2 : 0)} GB this month.`;
   for (const k of Object.keys(s.weights)) form[`w.${k}`].value = s.weights[k];
   for (const k of Object.keys(s.thresholds)) form[`t.${k}`].value = s.thresholds[k];
   form.openAtLogin.checked = s.openAtLogin;
-  form.wifiWarning.checked = s.wifiWarning;
   form.alertsNotify.checked = s.alerts.notify;
   form.degradedScore.value = Math.round(s.alerts.degradedScore * 100);
   form.degradedLoss.value = s.alerts.degradedLoss;
@@ -530,10 +544,14 @@ form.addEventListener('submit', async (e) => {
     dnsServers,
     speedtestEnabled: form.speedtestEnabled.checked,
     speedtestInterval: num('speedtestIntervalMin') * 60,
+    speedtestSchedule: form.querySelector('input[name=speedtestSchedule]:checked')?.value ?? 'interval',
+    speedtestTimes: form.speedtestTimes.value,
+    planDown: num('planDown'),
+    planUp: num('planUp'),
+    speedtestBudgetGB: num('speedtestBudgetGB'),
     weights: { loss: num('w.loss'), latency: num('w.latency'), jitter: num('w.jitter'), dnsLatency: num('w.dnsLatency') },
     thresholds: { loss: num('t.loss'), latency: num('t.latency'), jitter: num('t.jitter'), dnsLatency: num('t.dnsLatency') },
     openAtLogin: form.openAtLogin.checked,
-    wifiWarning: form.wifiWarning.checked,
     alerts: { notify: form.alertsNotify.checked, degradedScore: num('degradedScore') / 100, degradedLoss: num('degradedLoss') },
     retentionDays: num('retentionDays'),
   };
@@ -560,6 +578,44 @@ $('#clear-history').addEventListener('click', async () => {
 });
 dialog.addEventListener('click', (e) => {
   if (e.target === dialog) dialog.close(); // click on backdrop
+});
+
+// ------------------------------------------------------------ export
+
+const exportDialog = $('#export');
+const exportForm = $('#export-form');
+const toDateInput = (ts) => new Date(ts - new Date(ts).getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+
+$('#btn-export').addEventListener('click', () => {
+  $('#export-msg').textContent = '';
+  exportForm.from.value = toDateInput(Date.now() - 7 * 86400_000);
+  exportForm.to.value = toDateInput(Date.now());
+  exportDialog.showModal();
+});
+exportForm.range.addEventListener('change', () => {
+  $('#export-custom').hidden = exportForm.range.value !== 'custom';
+});
+$('#export-cancel').addEventListener('click', () => exportDialog.close());
+exportForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  let from;
+  let to = Date.now();
+  if (exportForm.range.value === 'custom') {
+    from = new Date(`${exportForm.from.value}T00:00`).getTime();
+    to = new Date(`${exportForm.to.value}T00:00`).getTime() + 86400_000; // include the "to" day
+  } else from = to - Number(exportForm.range.value);
+  const btn = $('#export-go');
+  btn.disabled = true;
+  $('#export-msg').textContent = 'Preparing…';
+  try {
+    const files = await api.exportReport({ from, to, format: exportForm.format.value });
+    if (files) exportDialog.close();
+    else $('#export-msg').textContent = '';
+  } catch (err) {
+    $('#export-msg').textContent = String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 // ------------------------------------------------------------ boot

@@ -1,5 +1,5 @@
 // Dev helper: starts the app normally, then saves PNGs of the dashboard.
-// Usage: electron scripts/screenshot.js <outPrefix> [delaySeconds] [--range=1h]
+// Usage: electron scripts/screenshot.js <outPrefix> [delaySeconds] [--range=1h] [--click=#selector]
 // Writes <outPrefix>-top.png and <outPrefix>-charts.png. Uses its own
 // userData folder ("Netprobe Dev") so real history is untouched.
 
@@ -10,6 +10,8 @@ const path = require('node:path');
 const args = process.argv.slice(2);
 const [out = 'screenshot', delay = '25'] = args.filter((a) => !a.startsWith('--'));
 const range = (args.find((a) => a.startsWith('--range=')) || '').split('=')[1];
+// --click=<selector> clicks something (e.g. a dialog button) before capturing.
+const click = (args.find((a) => a.startsWith('--click=')) || '').slice('--click='.length);
 
 app.setName('Netprobe Dev');
 app.setPath('userData', path.join(app.getPath('appData'), 'Netprobe Dev'));
@@ -30,6 +32,13 @@ app.whenReady().then(async () => {
     fs.writeFileSync(file, (await win.webContents.capturePage()).toPNG());
     console.log('saved', file);
   };
+  if (click) {
+    await js(`document.querySelector(${JSON.stringify(click)}).click()`);
+    await sleep(800);
+    await save('click');
+    app.exit(0);
+    return;
+  }
   await js('window.scrollTo(0, 0)');
   await sleep(300);
   await save('top');

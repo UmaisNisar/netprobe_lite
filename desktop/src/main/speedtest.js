@@ -6,6 +6,10 @@
 // refuses sizes of 100 MB or more), and each direction stops at MAX_BYTES so
 // fast lines don't burn gigabytes per test (8 s at 2 Gbps would be ~2 GB).
 // That is at most 10 requests per direction.
+//
+// Bufferbloat: latency is sampled before the test (idle) and continuously
+// while each direction is loaded; the increase shows how badly the router
+// or ISP queues packets under load (what makes calls lag during uploads).
 
 const { performance } = require('node:perf_hooks');
 
@@ -83,15 +87,40 @@ async function measure(stream, o) {
   if (failed || counter.bytes === 0) throw failed ? failed.reason : new Error('No data transferred');
   // Streams that hit the byte cap finish early; use the real duration then.
   const seconds = counter.bytes >= o.maxBytes ? (performance.now() - start) / 1000 : elapsed;
-  return (counter.bytes * 8) / seconds; // bits per second
+  return { bps: (counter.bytes * 8) / seconds, bytes: counter.bytes };
 }
 
-// Options exist for tests; the app always uses the defaults.
+const median = (xs) => {
+  if (!xs?.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+
+// Runs `phase` while `o.sampleLatency` (if given) pings in the background
+// until the phase settles. Returns [phaseResult, medianLatency].
+async function loaded(phase, o) {
+  const work = phase();
+  const samples = o.sampleLatency ? o.sampleLatency(work.catch(() => {})) : Promise.resolve(null);
+  const [result, rtts] = await Promise.all([work, samples]);
+  return [result, median(rtts)];
+}
+
+// Options exist for tests and for latency sampling; the app uses the
+// default endpoints and limits.
 async function run(options = {}) {
   const o = { ...DEFAULTS, ...options };
-  const download = await measure(downloadStream, o);
-  const upload = await measure(uploadStream, o);
-  return { download, upload };
+  const idle = o.sampleLatency ? median(await o.sampleLatency(new Promise((r) => setTimeout(r, o.idleMs ?? 2000)))) : null;
+  const [down, downLatency] = await loaded(() => measure(downloadStream, o), o);
+  const [up, upLatency] = await loaded(() => measure(uploadStream, o), o);
+  return {
+    download: down.bps,
+    upload: up.bps,
+    bytes: down.bytes + up.bytes,
+    idleLatency: idle,
+    downLatency,
+    upLatency,
+  };
 }
 
-module.exports = { run, HttpError, DEFAULTS };
+module.exports = { run, median, HttpError, DEFAULTS };

@@ -4,7 +4,10 @@ const dgram = require('node:dgram');
 const { EventEmitter } = require('node:events');
 const probe = require('../src/main/probe');
 
-const { parseRtts, jitterOf, runPing, pingSite, dnsTest, collect, deps } = probe;
+const { parseRtts, jitterOf, runPing, pingSite, dnsTest, collect, sampleLatency, percentile, deps } = probe;
+
+// Unit tests drive the ping-binary path; native ICMP is tested with fakes below.
+deps.native = null;
 
 // ------------------------------------------------------------ fakes
 
@@ -31,19 +34,27 @@ function withDeps(overrides, fn) {
 
 const winReply = (ms) => `Reply from 1.1.1.1: bytes=32 time=${ms}ms TTL=57`;
 
-// Minimal DNS server: answers A queries with 1.2.3.4, or SERVFAIL.
-async function dnsServer({ fail = false } = {}) {
+// Minimal DNS server: answers A queries with 1.2.3.4, NXDOMAIN for the
+// random "np-..." names used for uncached lookups, or SERVFAIL for all.
+async function dnsServer({ fail = false, failRandom = false } = {}) {
   const sock = dgram.createSocket('udp4');
   sock.on('message', (msg, rinfo) => {
     let i = 12; // skip header, walk the question name
-    while (msg[i] !== 0) i += msg[i] + 1;
+    const labels = [];
+    while (msg[i] !== 0) {
+      labels.push(msg.subarray(i + 1, i + 1 + msg[i]).toString());
+      i += msg[i] + 1;
+    }
+    const random = labels[0].startsWith('np-');
+    const servfail = fail || (random && failRandom);
+    const nxdomain = random && !servfail;
     const question = msg.subarray(12, i + 5);
     const header = Buffer.alloc(12);
     msg.copy(header, 0, 0, 2); // id
-    header.writeUInt16BE(fail ? 0x8182 : 0x8180, 2);
+    header.writeUInt16BE(servfail ? 0x8182 : nxdomain ? 0x8183 : 0x8180, 2);
     header.writeUInt16BE(1, 4); // qdcount
-    header.writeUInt16BE(fail ? 0 : 1, 6); // ancount
-    const answer = fail
+    header.writeUInt16BE(servfail || nxdomain ? 0 : 1, 6); // ancount
+    const answer = servfail || nxdomain
       ? Buffer.alloc(0)
       : Buffer.from([0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 1, 2, 3, 4]);
     sock.send(Buffer.concat([header, question, answer]), rinfo.port, rinfo.address);
@@ -154,13 +165,13 @@ test('pingSite splits the count across parallel streams and aggregates', async (
   assert.strictEqual(calls.length, 5);
   assert.ok(calls.every((c) => c.args[1] === '4')); // 20 pings / 5 streams
   // 5 streams x 4 sent = 20 sent, 10 received
-  assert.deepStrictEqual(r, { site: 'a.com', latency: 12, loss: 50, jitter: 4 });
+  assert.deepStrictEqual(r, { site: 'a.com', latency: 12, loss: 50, jitter: 4, p50: 12, p95: 14, p99: 14 });
 });
 
 test('pingSite reports null latency/jitter and 100% loss when nothing replies', async () => {
   const spawn = fakeSpawn(() => 'Request timed out.');
   const r = await withDeps({ platform: 'win32', spawn }, () => pingSite('a.com', 10));
-  assert.deepStrictEqual(r, { site: 'a.com', latency: null, loss: 100, jitter: null });
+  assert.deepStrictEqual(r, { site: 'a.com', latency: null, loss: 100, jitter: null, p50: null, p95: null, p99: null });
 });
 
 test('pingSite never starts more streams than pings', async () => {
@@ -178,13 +189,26 @@ test('pingSite rounds to two decimals', async () => {
 
 // ------------------------------------------------------------ DNS
 
-test('dnsTest measures a successful lookup', async () => {
+test('dnsTest measures a cached and an uncached (random subdomain) lookup', async () => {
   const srv = await dnsServer();
   try {
     const r = await dnsTest('example.com', { name: 'Local', ip: srv.address });
     assert.strictEqual(r.ok, true);
     assert.strictEqual(r.name, 'Local');
     assert.ok(r.latency >= 0 && r.latency < 1000, `latency ${r.latency}`);
+    // NXDOMAIN for the random name still counts as an answer.
+    assert.ok(r.uncached >= 0 && r.uncached < 1000, `uncached ${r.uncached}`);
+  } finally {
+    srv.close();
+  }
+});
+
+test('dnsTest keeps the cached result when only the uncached lookup fails', async () => {
+  const srv = await dnsServer({ failRandom: true });
+  try {
+    const r = await dnsTest('example.com', { name: 'Local', ip: srv.address });
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.uncached, null);
   } finally {
     srv.close();
   }
@@ -194,7 +218,7 @@ test('dnsTest scores a SERVFAIL as a failure', async () => {
   const srv = await dnsServer({ fail: true });
   try {
     const r = await dnsTest('example.com', { name: 'Local', ip: srv.address });
-    assert.deepStrictEqual(r, { name: 'Local', ip: srv.address, latency: probe.DNS_FAIL_MS, ok: false });
+    assert.deepStrictEqual(r, { name: 'Local', ip: srv.address, latency: probe.DNS_FAIL_MS, ok: false, uncached: null });
   } finally {
     srv.close();
   }
@@ -202,7 +226,7 @@ test('dnsTest scores a SERVFAIL as a failure', async () => {
 
 test('dnsTest scores an invalid server address as a failure', async () => {
   const r = await dnsTest('example.com', { name: 'Bad', ip: 'not-an-ip' });
-  assert.deepStrictEqual(r, { name: 'Bad', ip: 'not-an-ip', latency: probe.DNS_FAIL_MS, ok: false });
+  assert.deepStrictEqual(r, { name: 'Bad', ip: 'not-an-ip', latency: probe.DNS_FAIL_MS, ok: false, uncached: null });
 });
 
 test('dnsTest scores a timeout as a failure', async () => {
@@ -251,7 +275,7 @@ test('collect pings the router and ISP hop with a smaller count', async () => {
       { path: { gateway: '192.168.1.1', isp: null }, dnsServers: [] }
     )
   );
-  assert.deepStrictEqual(result.path, { gateway: { ip: '192.168.1.1', latency: 3, loss: 75, jitter: 0 }, isp: null });
+  assert.deepStrictEqual(result.path, { gateway: { ip: '192.168.1.1', latency: 3, loss: 75, jitter: 0, p95: 3 }, isp: null });
   const gwCalls = calls.filter((c) => c.args.includes('192.168.1.1'));
   // PATH_PINGS (20) over 5 streams, each answering 1 of its 4 pings.
   assert.strictEqual(gwCalls.length, 5);
@@ -271,4 +295,65 @@ test('collect uses the dnsServers override', async () => {
   } finally {
     srv.close();
   }
+});
+
+// ------------------------------------------------------------ 1.2 additions
+
+test('percentile interpolates between ranks', () => {
+  assert.strictEqual(percentile([], 95), null);
+  assert.strictEqual(percentile([5], 95), 5);
+  assert.strictEqual(percentile([1, 2, 3, 4, 5], 50), 3);
+  assert.strictEqual(percentile([4, 1, 3, 2], 50), 2.5);
+  assert.ok(Math.abs(percentile([10, 20, 30, 40, 100], 95) - 88) < 1e-9);
+});
+
+test('pingSite uses the native ICMP backend when available', async () => {
+  const calls = [];
+  const native = async (host, count, opts) => {
+    calls.push({ host, count, opts });
+    return { sent: 10, rtts: [[1.5, 2.5], [2, 3], [1, 1]] };
+  };
+  const spawnCalls = [];
+  const r = await withDeps({ native, spawn: fakeSpawn(() => '', spawnCalls) }, () => pingSite('a.com', 10, 3));
+  assert.deepStrictEqual(calls, [{ host: 'a.com', count: 10, opts: { streams: 3 } }]);
+  assert.strictEqual(spawnCalls.length, 0, 'no ping processes started');
+  assert.strictEqual(r.loss, 40);
+  assert.strictEqual(r.latency, 1.83);
+  assert.strictEqual(r.jitter, 0.67); // (1 + 1 + 0) / 3, rounded
+});
+
+test('pingSite falls back to the ping binary when native returns null', async () => {
+  const spawnCalls = [];
+  const r = await withDeps({ native: async () => null, platform: 'win32', spawn: fakeSpawn(() => winReply(4), spawnCalls) }, () =>
+    pingSite('a.com', 4, 2)
+  );
+  assert.strictEqual(spawnCalls.length, 2);
+  assert.strictEqual(r.latency, 4);
+});
+
+test('sampleLatency collects RTTs until the phase settles (native)', async () => {
+  let resolve;
+  const until = new Promise((r) => (resolve = r));
+  let batches = 0;
+  const native = async () => {
+    batches++;
+    if (batches === 3) resolve();
+    await new Promise((r) => setTimeout(r, 5));
+    return { sent: 5, rtts: [[10, 11]] };
+  };
+  const rtts = await withDeps({ native }, () => sampleLatency('1.1.1.1', until));
+  assert.strictEqual(batches, 3);
+  assert.deepStrictEqual(rtts, [10, 11, 10, 11, 10, 11]);
+});
+
+test('sampleLatency uses the ping binary without native, and stops on rejection too', async () => {
+  let reject;
+  const until = new Promise((_, r) => (reject = r));
+  let n = 0;
+  const spawn = fakeSpawn(() => {
+    if (++n === 2) reject(new Error('phase failed'));
+    return winReply(20);
+  });
+  const rtts = await withDeps({ native: null, platform: 'win32', spawn }, () => sampleLatency('1.1.1.1', until));
+  assert.deepStrictEqual(rtts, [20, 20]);
 });

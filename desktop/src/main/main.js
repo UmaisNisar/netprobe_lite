@@ -2,8 +2,10 @@
 // window, tray, notifications, power events and IPC; all measuring and
 // scheduling lives in monitor.js.
 
-const { app, BrowserWindow, Tray, Menu, Notification, ipcMain, nativeImage, powerMonitor, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, Notification, dialog, ipcMain, nativeImage, powerMonitor, shell } = require('electron');
+const fs = require('node:fs');
 const path = require('node:path');
+const report = require('./report');
 const { Settings } = require('./settings');
 const { Store } = require('./db');
 const { Monitor } = require('./monitor');
@@ -135,6 +137,63 @@ function applyLoginItem() {
   app.setLoginItemSettings({ openAtLogin: settings.get().openAtLogin, args: ['--hidden'] });
 }
 
+// ---------------------------------------------------------------- export
+
+const stamp = (ts) => new Date(ts).toISOString().slice(0, 10);
+
+async function renderPdf(data) {
+  const page = new BrowserWindow({
+    show: false,
+    width: 900,
+    height: 1200,
+    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+  });
+  try {
+    await page.loadFile(path.join(__dirname, '..', 'renderer', 'report.html'));
+    await page.webContents.executeJavaScript(`window.renderReport(${JSON.stringify(data)})`);
+    return await page.webContents.printToPDF({ pageSize: 'A4', printBackground: true });
+  } finally {
+    page.destroy();
+  }
+}
+
+// Returns the saved file paths, or null if the user cancelled.
+async function exportReport({ from, to, format }) {
+  const s = settings.get();
+  from = Number(from);
+  to = Number(to);
+  if (!(to > from)) throw new Error('The end of the period must be after its start.');
+  const base = `netprobe-${stamp(from)}-to-${stamp(to)}`;
+  if (format === 'csv') {
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      title: 'Export measurements as CSV',
+      defaultPath: path.join(app.getPath('documents'), `${base}-probes.csv`),
+      filters: [{ name: 'CSV', extensions: ['csv'] }],
+    });
+    if (canceled || !filePath) return null;
+    const stem = filePath.replace(/(-probes)?\.csv$/i, '');
+    const files = [
+      [`${stem}-probes.csv`, report.probesCsv(monitor.store.runsBetween(from, to))],
+      [`${stem}-incidents.csv`, report.incidentsCsv(monitor.store.incidentsBetween(from, to))],
+      [`${stem}-speedtests.csv`, report.speedCsv(monitor.store.speedBetween(from, to))],
+    ];
+    const BOM = String.fromCharCode(0xfeff); // so Excel reads the files as UTF-8
+    for (const [file, body] of files) fs.writeFileSync(file, BOM + body);
+    shell.showItemInFolder(files[0][0]);
+    return files.map((f) => f[0]);
+  }
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    title: 'Save report as PDF',
+    defaultPath: path.join(app.getPath('documents'), `${base}-report.pdf`),
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  });
+  if (canceled || !filePath) return null;
+  const pdf = await renderPdf(report.buildReport(monitor.store, { from, to, settings: s }));
+  fs.writeFileSync(filePath, pdf);
+  shell.openPath(filePath);
+  return [filePath];
+}
+
 // ---------------------------------------------------------------- IPC
 
 ipcMain.handle('get-state', () => monitor.publicState());
@@ -151,6 +210,7 @@ ipcMain.handle('probe-now', () => monitor.runProbe());
 ipcMain.handle('speedtest-now', () => monitor.runSpeedtest());
 ipcMain.handle('toggle-pause', () => monitor.togglePause());
 ipcMain.handle('clear-history', () => monitor.clearHistory());
+ipcMain.handle('export-report', (_e, opts) => exportReport(opts));
 
 // ---------------------------------------------------------------- lifecycle
 

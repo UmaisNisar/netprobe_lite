@@ -41,16 +41,19 @@ The builds are not code-signed (signing certificates cost money), so your OS wil
 - **Tells you when your internet breaks.** Outages (2 probes in a row where no site answers) and slowdowns (3 bad probes in a row) become **incidents** with a start, end, duration and severity. You get a desktop notification when one starts and when it's over, a red strip on the dashboard while it lasts, and shaded bands on every chart.
 - **Tells you where the problem is.** Each probe also pings **your router** and **your ISP's first router**, so Netprobe can say whether a problem is in your home network (Wi-Fi or router), at your ISP, or further out. A traceroute is saved with every incident.
 - **Uptime.** Uptime for the last 24 hours and 7 days, counting only the time the computer was on.
+- **A report you can send your ISP.** **Export report** creates a PDF with plain-language findings ("uptime 99.4%: 3 outages totalling 22 min; most located at your ISP"), charts, an incident list with likely causes, a day-by-day table and speed tests compared with your plan. It can also export the raw data as CSV.
+- **Measures what matters.** It reports 95th-percentile latency, not just averages (spikes are what ruin calls), and full uncached DNS lookups as well as cached ones. Speed tests measure **latency under load (bufferbloat)** and grade it A+ to F.
+- **Speed tests on your terms.** Enter your plan's speeds to see results as a % of what you pay for. Run tests every N minutes or at set times of day (e.g. peak vs off-peak), and cap how much data automatic tests may use each month.
 - **Runs in the tray.** Closing the window keeps monitoring. The tray icon turns green, amber or red with your score, and hovering it shows the current numbers.
 - **Starts at login** (optional, on by default) so history builds up without you thinking about it.
 - **Live dashboard:** a score gauge, current latency, loss, jitter, DNS and bandwidth, plus a per-site and per-DNS-server breakdown of the latest probe.
 - **History charts** for 1h, 6h, 24h, 7d or 30d, with synced crosshairs across all charts. Gaps show when the PC was off rather than drawing misleading lines.
 - **Settings in the app:** sites, DNS servers, probe interval, score weights, thresholds, speed test and retention. No `.env` editing.
 - **Follows your network.** Your own DNS server and your router are detected from the network you're on and update automatically when you switch networks (home, office, phone hotspot).
-- **Knows the conditions of every sample.** It warns you on Wi-Fi or a VPN, records the connection type with every probe, and lets you filter history to wired-only or Wi-Fi-only.
+- **Knows the conditions of every sample.** A chip in the top bar shows Wi-Fi, Wired or VPN (hover it for what that means). The connection type is recorded with every probe, and history can be filtered to wired-only or Wi-Fi-only.
 - **No false outages.** Monitoring pauses while the computer sleeps. After waking up or switching networks, it waits for the connection to settle before judging anything.
 - **Local only.** Data stays in a SQLite file on your machine. No accounts, no telemetry, no open ports.
-- **No admin rights needed.** It uses your OS's built-in `ping`.
+- **No admin rights needed.** On Windows it calls the system's ICMP API directly (sub-millisecond timing); elsewhere it uses the built-in `ping`.
 
 ## What it measures
 
@@ -58,12 +61,13 @@ Every probe (default: every 30 s):
 
 | Metric | How |
 |---|---|
-| **Latency** | Average round-trip time of 50 pings to each site (default: google.com, facebook.com, twitter.com, youtube.com, cloudflare.com) |
+| **Latency** | Average, median and 95th/99th percentile round-trip time of 50 pings to each site (default: google.com, facebook.com, twitter.com, youtube.com, cloudflare.com) |
 | **Packet loss** | Percentage of those pings that got no reply |
 | **Jitter** | Mean difference between consecutive ping times (RFC 3550 style) |
-| **DNS response time** | Time to resolve `google.com` against Google (8.8.8.8), Quad9 (9.9.9.9), Cloudflare (1.1.1.1) and **your own DNS server**. A failed lookup counts as 5000 ms |
+| **DNS response time** | Time to resolve `google.com` against Google (8.8.8.8), Quad9 (9.9.9.9), Cloudflare (1.1.1.1) and **your own DNS server**. A failed lookup counts as 5000 ms. A second lookup of a random name (which no resolver can have cached) measures a full recursive lookup |
 | **Path** | 20 pings each to your router and to your ISP's first router (found with a fast TTL scan), used to locate problems |
 | **Bandwidth** *(optional, off by default)* | Download and upload throughput against `speed.cloudflare.com`, using 4 parallel streams for 8 seconds each way (capped at 500 MB per direction) |
+| **Bufferbloat** *(with each speed test)* | Latency to 1.1.1.1 while idle and while the download and upload are running. The increase is graded A+ (<5 ms) / A (<30) / B (<60) / C (<200) / D (<400) / F, the same scale as Waveform's bufferbloat test |
 
 ### Incidents and "where's the problem"
 
@@ -97,11 +101,11 @@ score = 1 − 0.60 × min(loss / 5%, 1)
 
 ## Getting accurate results
 
-- **Use a wired connection if you can.** On Wi-Fi you're measuring your Wi-Fi *plus* your ISP. That's still useful, and the router check tells you when Wi-Fi is the culprit, but for the cleanest ISP data run it on a PC connected to your router by Ethernet. Netprobe detects the connection that carries your internet traffic (on Windows, macOS and Linux) and shows a warning on Wi-Fi or a VPN. You can turn the warning off in Settings.
+- **Use a wired connection if you can.** On Wi-Fi you're measuring your Wi-Fi *plus* your ISP. That's still useful, and the router check tells you when Wi-Fi is the culprit, but for the cleanest ISP data run it on a PC connected to your router by Ethernet. The top-bar chip shows which kind of connection your internet traffic is using.
 - **Turn off your VPN.** With a VPN on, every measurement goes through the VPN server, so it says nothing about your ISP.
 - **Leave it running.** Netprobe only records while your computer is on. For 24/7 coverage, run it on an always-on machine, or use the [original Docker version](docs/DOCKER.md) on a home server.
 - **Some sites ignore ping.** amazon.com and netflix.com, for example, block ICMP. A site that answers no pings while others do is marked **no reply** and left out of the score. If *every* site goes silent, that's an outage and counts as 100% loss.
-- **Speed tests use data.** A test uses about 200 MB on a 100 Mbps line and at most ~1 GB on gigabit+. At the default ~15-minute interval that adds up, so leave it off on metered or mobile connections, or raise the interval.
+- **Speed tests use data.** A test uses about 200 MB on a 100 Mbps line and at most ~1 GB on gigabit+. At the default ~15-minute interval that adds up, so leave it off on metered or mobile connections, use set times of day instead, or set a monthly data budget. If Cloudflare rate-limits the tests, Netprobe backs off automatically (30 min, doubling up to 4 h).
 
 ## Settings
 
@@ -114,10 +118,11 @@ Click **Settings** in the top-right corner of the dashboard.
 | Pings per site | 50 | Sent over 5 parallel streams, so a probe takes about 10 s |
 | DNS test domain | google.com | |
 | DNS servers | Google, Quad9, Cloudflare, *your network's DNS* | Mark the one your network uses as **mine**; it feeds the score. With **auto**, it follows whichever network you're on |
-| Speed test | Off | Interval in minutes (default ~15) |
+| Speed test | Off | Every N minutes (default ~15) or at set times of day |
+| Your plan | not set | Download/upload Mbps; results are shown as a % of the plan |
+| Monthly data budget | no limit | Automatic tests stop once they've used this many GB in the month |
 | Score weights / thresholds | 0.6 / 0.15 / 0.2 / 0.05 and 5% / 100 / 30 / 100 ms | Weights should add up to 1.0 |
 | Start at login | On | Starts hidden in the tray |
-| Warn on Wi-Fi / VPN | On | Shows the banner; "Don't warn again" turns this off |
 | Notifications | On | Desktop notification when an incident starts and ends |
 | Slowdown thresholds | score < 60% or loss ≥ 2% | What counts as a bad probe |
 | Keep history for | 30 days | Older data is deleted automatically |
@@ -148,6 +153,8 @@ It contains `settings.json` and `netprobe.db` (SQLite). Delete the folder to res
 | Home DNS | Must be named `My_DNS_Server`, or the score crashes | Any server can be marked "mine"; auto-detected |
 | Sites that block ping | Silently dropped | Shown as "no reply", left out of the score |
 | Outages and alerts | None (charts only) | Incidents, notifications, uptime, traceroutes |
+| Reports | Grafana screenshots | PDF report with findings, CSV export |
+| Latency detail | Averages | Percentiles, bufferbloat, uncached DNS |
 | Locating problems | No | Router vs ISP vs beyond |
 | Runs when | Always, on a server | While your computer is on |
 | Platforms | Linux (anywhere Docker runs) | Windows, macOS, Linux |
@@ -177,8 +184,10 @@ npm run dist:linux   # -> dist/Netprobe-linux.AppImage
 
 | Suite | What it covers |
 |---|---|
-| `test/probe.test.js` | Ping output parsing (Windows, localized Windows, macOS, Linux), per-OS `ping` arguments, parallel-stream aggregation, jitter, DNS timing against a local fake DNS server (success, SERVFAIL, timeout, bad address) |
-| `test/speedtest.test.js` | Throughput math, 500 MB cap, request count, HTTP 429/403/500 and network failures (fake `fetch`) |
+| `test/probe.test.js` | Ping output parsing (Windows, localized Windows, macOS, Linux), per-OS `ping` arguments, native/binary backends, percentiles, jitter, latency sampling, cached and uncached DNS against a local fake DNS server (success, NXDOMAIN, SERVFAIL, timeout, bad address) |
+| `test/icmp.test.js` | Windows ICMP via koffi (with a fake koffi on every OS, plus the real API on Windows): byte order, reply parsing, losses, warm-up, fallback when unavailable |
+| `test/report.test.js` | Report maths (uptime, clipping, plan %, bufferbloat), plain-language findings, daily breakdown, downsampling, CSV escaping and columns |
+| `test/speedtest.test.js` | Throughput math, 500 MB cap, request count, data used, latency under load per direction, HTTP 429/403/500 and network failures (fake `fetch`) |
 | `test/score.test.js` | Quality score formula, thresholds, non-replying sites, outages, home-DNS selection |
 | `test/db.test.js` | SQLite writes, upgrading 1.0 databases, time-window queries, connection filter, bucket averaging, incidents, uptime, retention, atomic saves |
 | `test/network.test.js` | Interface, router and DNS detection per OS (including VPNs), TTL hop discovery, finding the ISP's router |
@@ -187,7 +196,7 @@ npm run dist:linux   # -> dist/Netprobe-linux.AppImage
 | `test/trace.test.js` | Traceroute per OS, partial output, missing tools |
 | `test/settings.test.js` | Defaults, first-run DNS detection, validation and clamping, corrupt files, persistence |
 | `test/renderer-lib.test.js` | Dashboard formatting, colour levels, chart data pivoting and gap handling, HTML escaping |
-| `scripts/smoke.js` | Launches the real Electron app and checks the dashboard loads without errors and a full probe is stored and rendered |
+| `scripts/smoke.js` | Launches the real Electron app and checks the dashboard loads without errors, a full probe is stored and rendered, and a PDF report renders |
 
 Coverage minimums (90% lines, 90% functions, 80% branches) are enforced by `npm run check`. `main.js`, `monitor.js`, `preload.js` and `app.js` are covered by the smoke test instead.
 
@@ -208,7 +217,7 @@ Coverage minimums (90% lines, 90% functions, 80% branches) are enforced by `npm 
 To release:
 
 ```sh
-git tag desktop-v1.2.0 && git push origin desktop-v1.2.0
+git tag desktop-v1.3.0 && git push origin desktop-v1.3.0
 ```
 
 The Docker version keeps upstream's `v*` tags; desktop releases use `desktop-v*` so the two never collide.
@@ -221,23 +230,25 @@ desktop/
 │   ├── main/
 │   │   ├── main.js        # Electron shell: window, tray, notifications, power events, IPC
 │   │   ├── monitor.js     # engine: scheduling, state, incidents, sleep/network handling
-│   │   ├── probe.js       # ping (loss/latency/jitter), router/ISP pings, DNS timing
+│   │   ├── probe.js       # ping (loss/latency/jitter/percentiles), router/ISP pings, DNS timing
+│   │   ├── icmp.js        # native Windows ICMP (IcmpSendEcho via koffi), ping.exe fallback
 │   │   ├── network.js     # interface/router/DNS detection, TTL hop discovery
 │   │   ├── diagnose.js    # ok/slowdown/outage + where the problem is
 │   │   ├── incidents.js   # incident state machine
 │   │   ├── trace.js       # traceroute captured on incidents
-│   │   ├── speedtest.js   # Cloudflare bandwidth test
+│   │   ├── speedtest.js   # Cloudflare bandwidth test + latency under load
+│   │   ├── report.js      # report data, findings, CSV export
 │   │   ├── score.js       # Internet Quality Score
 │   │   ├── db.js          # SQLite history (node:sqlite), downsampling, retention
 │   │   └── settings.js    # settings.json, defaults, validation, DNS auto-detect
 │   ├── preload.js         # safe IPC bridge to the dashboard
-│   └── renderer/          # dashboard UI (HTML/CSS/JS + uPlot charts)
+│   └── renderer/          # dashboard (index.html, app.js), PDF report page (report.html), shared lib.js
 ├── assets/                # app and tray icons (generated by `npm run icons`)
 ├── scripts/               # smoke test, icon generator, screenshot helper
 └── test/                  # node:test unit tests
 ```
 
-It has no native modules and no bundler. Storage uses the SQLite built into Electron's Node runtime, and the only runtime dependency is [uPlot](https://github.com/leeoniya/uPlot) for charts.
+There's no bundler. Storage uses the SQLite built into Electron's Node runtime. Runtime dependencies are [uPlot](https://github.com/leeoniya/uPlot) for charts and [koffi](https://koffi.dev) for the Windows ICMP call (only the Windows builds of koffi are packaged; if it can't load, Netprobe falls back to `ping.exe`).
 
 ## Credits and license
 

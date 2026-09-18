@@ -69,7 +69,11 @@ test('history averages samples into buckets for long windows', (t) => {
   const weighted = h.runs.reduce((a, r) => a + r.score, 0) / h.runs.length;
   assert.ok(weighted > 0.8 && weighted < 1);
   const siteA = h.sites.filter((s) => s.site === 'a.com');
-  assert.ok(siteA.length <= 2 && siteA.every((s) => s.latency > 10 && s.latency < 20));
+  // Buckets are aligned to the clock, so an hour boundary can fall inside
+  // the 15 minutes; a bucket may then hold a single 10 or 20 ms sample.
+  assert.ok(siteA.length <= 2 && siteA.every((s) => s.latency >= 10 && s.latency <= 20));
+  const largest = siteA.reduce((a, b) => (b.latency !== 10 && b.latency !== 20 ? b : a), siteA[0]);
+  assert.ok(largest.latency > 10 && largest.latency < 20, 'the bigger bucket averages both values');
   // A 1 hour window keeps every probe.
   assert.strictEqual(store.history(now - HOUR).runs.length, 30);
 });
@@ -230,4 +234,46 @@ test('prune and clear include incidents', (t) => {
   assert.strictEqual(store.incidents(0).length, 1);
   store.clear();
   assert.strictEqual(store.incidents(0).length, 0);
+});
+
+// ------------------------------------------------------------ 1.2 additions
+
+test('stores p95 per probe and site, and uncached DNS', (t) => {
+  const { store } = tempStore(t);
+  const r = {
+    stats: [{ site: 'a.com', latency: 10, loss: 0, jitter: 1, p95: 18 }],
+    dns: [{ name: 'Home', ip: '1.1.1.1', latency: 5, uncached: 40 }],
+  };
+  store.saveProbe(Date.now(), r, { ...summary(), p95: 18 });
+  const h = store.history(Date.now() - HOUR);
+  assert.strictEqual(h.runs[0].p95, 18);
+  assert.strictEqual(h.sites[0].p95, 18);
+  assert.strictEqual(h.dns[0].uncached, 40);
+});
+
+test('stores speed test latency and data used; sums bytes for the budget', (t) => {
+  const { store } = tempStore(t);
+  const now = Date.now();
+  store.saveSpeed(now - 40 * DAY, { download: 1, upload: 1, bytes: 9e9 });
+  store.saveSpeed(now - 2000, { download: 100e6, upload: 10e6, idleLatency: 5, downLatency: 30, upLatency: 60, bytes: 5e8 });
+  store.saveSpeed(now - 1000, { download: 100e6, upload: 10e6, bytes: 2e8 });
+  const latest = store.latestSpeed();
+  assert.strictEqual(latest.bytes, 2e8);
+  const [withLatency] = store.speedBetween(now - 3000, now - 1500);
+  assert.deepStrictEqual([withLatency.idle_latency, withLatency.down_latency, withLatency.up_latency], [5, 30, 60]);
+  assert.strictEqual(store.speedBytes(now - DAY), 7e8);
+});
+
+test('range queries for reports', (t) => {
+  const { store } = tempStore(t);
+  const now = Date.now();
+  store.saveProbe(now - 3 * HOUR, result(), summary(0.1));
+  store.saveProbe(now - HOUR, result(), summary(0.9));
+  store.saveIncident({ start: now - 5 * HOUR, end: now - 4 * HOUR, kind: 'outage', where: 'isp', conn: 'wired', worstScore: 0, maxLoss: 100, probes: 2 });
+  store.saveIncident({ start: now - 2 * HOUR - 10, end: null, kind: 'degraded', where: 'home', conn: 'wifi', worstScore: 0.5, maxLoss: 5, probes: 3 });
+  const runs = store.runsBetween(now - 2 * HOUR, now);
+  assert.deepStrictEqual(runs.map((r) => r.score), [0.9]);
+  const incidents = store.incidentsBetween(now - 2 * HOUR, now);
+  assert.deepStrictEqual(incidents.map((i) => i.kind), ['degraded'], 'open incidents overlapping the range are included');
+  assert.strictEqual(store.incidentsBetween(now - 6 * HOUR, now).length, 2);
 });

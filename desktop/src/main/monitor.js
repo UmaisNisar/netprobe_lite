@@ -17,6 +17,28 @@ const SETTLE_AFTER_WAKE_MS = 30_000;
 const SETTLE_AFTER_CHANGE_MS = 20_000;
 const CONNECTION_POLL_MS = 60_000;
 const DAY = 86400_000;
+const BLOAT_TARGET = '1.1.1.1'; // same network as the speed test servers
+const BACKOFF_START_MS = 30 * 60_000; // after a 429, wait at least this long...
+const BACKOFF_MAX_MS = 4 * 3600_000; // ...doubling up to this
+
+// Start of the current calendar month (local time), for the data budget.
+function monthStart(now) {
+  const d = new Date(now);
+  return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+}
+
+// Milliseconds until the next of the given "HH:MM" local times.
+function untilNextTime(times, now) {
+  const d = new Date(now);
+  let best = Infinity;
+  for (const t of times) {
+    const [h, m] = t.split(':').map(Number);
+    const at = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m, 0, 0).getTime();
+    const next = at > now ? at : at + DAY;
+    best = Math.min(best, next - now);
+  }
+  return best;
+}
 
 class Monitor extends EventEmitter {
   constructor({ settings, store, deps = {} }) {
@@ -26,6 +48,7 @@ class Monitor extends EventEmitter {
     this.deps = {
       collect: probe.collect,
       speedtest: speedtest.run,
+      sampleLatency: probe.sampleLatency,
       detectConnection: network.detectConnection,
       discoverHops: network.discoverHops,
       ispHop: network.ispHop,
@@ -56,6 +79,9 @@ class Monitor extends EventEmitter {
       path: { gateway: null, isp: null },
       incident: null, // open incident, if any
       uptime: { day: null, week: null },
+      speedBackoffMs: 0, // current wait after a rate-limit, 0 = none
+      speedSkipped: null, // 'budget' when the monthly data budget is used up
+      speedUsage: { month: 0 }, // bytes used by speed tests this month
     };
   }
 
@@ -66,6 +92,7 @@ class Monitor extends EventEmitter {
     store.closeDangling();
     const speed = store.latestSpeed();
     if (speed) this.state.speed = speed;
+    this.#refreshUsage();
     this.#refreshUptime();
     this.prune();
     this.timers.prune = deps.setInterval(() => this.prune(), 3600_000);
@@ -169,29 +196,62 @@ class Monitor extends EventEmitter {
 
   // ---------------------------------------------------------- speed test
 
-  async runSpeedtest() {
+  // `scheduled` runs respect the monthly data budget; manual ones don't.
+  async runSpeedtest({ scheduled = false } = {}) {
     const { state, deps } = this;
     if (state.speedtesting || state.sleeping) return;
+    const s = this.settings.get();
+    this.#refreshUsage();
+    if (scheduled && s.speedtestBudgetGB > 0 && state.speedUsage.month >= s.speedtestBudgetGB * 1e9) {
+      state.speedSkipped = 'budget';
+      this.#emitState();
+      return;
+    }
+    state.speedSkipped = null;
     // Let an in-flight probe finish first so the two don't skew each other.
     while (state.probing) await new Promise((r) => deps.setTimeout(r, 500));
     state.speedtesting = true;
     this.#emitState();
     try {
-      const result = await deps.speedtest();
+      const result = await deps.speedtest({ sampleLatency: (until) => deps.sampleLatency(BLOAT_TARGET, until) });
       const ts = deps.now();
       this.store.saveSpeed(ts, result);
-      state.speed = { ts, ...result };
+      state.speed = {
+        ts,
+        download: result.download,
+        upload: result.upload,
+        idle_latency: result.idleLatency,
+        down_latency: result.downLatency,
+        up_latency: result.upLatency,
+        bytes: result.bytes,
+      };
       state.speedError = null;
+      state.speedBackoffMs = 0;
     } catch (e) {
       state.speedError = String(e?.message || e);
+      // Rate-limited: back off (doubling) instead of retrying at the next slot.
+      if (e?.status === 429) {
+        state.speedBackoffMs = Math.min(BACKOFF_MAX_MS, Math.max(BACKOFF_START_MS, state.speedBackoffMs * 2));
+      }
     } finally {
       state.speedtesting = false;
+      this.#refreshUsage();
       this.#emitState();
     }
   }
 
-  // With no explicit delay, the next test is due one interval after the last
-  // one (surviving restarts), but never sooner than a minute from now.
+  #refreshUsage() {
+    try {
+      this.state.speedUsage = { month: this.store.speedBytes(monthStart(this.deps.now())) };
+    } catch {
+      // Keep the previous figure.
+    }
+  }
+
+  // With no explicit delay: on the 'interval' schedule the next test is due
+  // one interval after the last one (surviving restarts), but never sooner
+  // than a minute from now; on 'times' it's the next listed time of day.
+  // After a rate-limit the wait is at least the current back-off.
   scheduleSpeedtest(delayMs) {
     const { deps, state } = this;
     deps.clearTimeout(this.timers.speed);
@@ -200,13 +260,21 @@ class Monitor extends EventEmitter {
       state.nextSpeedtestAt = null;
       return;
     }
-    const interval = s.speedtestInterval * 1000;
-    const sinceLast = state.speed ? deps.now() - state.speed.ts : Infinity;
-    const delay = delayMs ?? Math.max(60_000, Math.min(interval, interval - sinceLast));
-    state.nextSpeedtestAt = deps.now() + delay;
+    const now = deps.now();
+    let delay = delayMs;
+    if (delay == null) {
+      if (s.speedtestSchedule === 'times') delay = untilNextTime(s.speedtestTimes, now);
+      else {
+        const interval = s.speedtestInterval * 1000;
+        const sinceLast = state.speed ? now - state.speed.ts : Infinity;
+        delay = Math.max(60_000, Math.min(interval, interval - sinceLast));
+      }
+      delay = Math.max(delay, state.speedBackoffMs);
+    }
+    state.nextSpeedtestAt = now + delay;
     this.timers.speed = deps.setTimeout(async () => {
-      await this.runSpeedtest();
-      this.scheduleSpeedtest(interval);
+      await this.runSpeedtest({ scheduled: true });
+      this.scheduleSpeedtest(this.settings.get().speedtestSchedule === 'times' ? undefined : Math.max(this.settings.get().speedtestInterval * 1000, state.speedBackoffMs));
     }, delay);
   }
 
@@ -342,10 +410,10 @@ class Monitor extends EventEmitter {
 
   applySettings(before, after) {
     if (before.probeInterval !== after.probeInterval) this.scheduleProbe();
-    if (!before.speedtestEnabled && after.speedtestEnabled) this.scheduleSpeedtest(5000);
-    else if (before.speedtestEnabled !== after.speedtestEnabled || before.speedtestInterval !== after.speedtestInterval) {
-      this.scheduleSpeedtest();
-    }
+    const scheduleChanged = ['speedtestInterval', 'speedtestSchedule'].some((k) => before[k] !== after[k]) ||
+      before.speedtestTimes.join() !== after.speedtestTimes.join();
+    if (!before.speedtestEnabled && after.speedtestEnabled && after.speedtestSchedule === 'interval') this.scheduleSpeedtest(5000);
+    else if (before.speedtestEnabled !== after.speedtestEnabled || scheduleChanged) this.scheduleSpeedtest();
     if (before.retentionDays !== after.retentionDays) this.prune();
     this.#emitState();
   }
@@ -377,4 +445,4 @@ class Monitor extends EventEmitter {
   }
 }
 
-module.exports = { Monitor, SETTLE_AFTER_WAKE_MS, SETTLE_AFTER_CHANGE_MS };
+module.exports = { Monitor, untilNextTime, monthStart, SETTLE_AFTER_WAKE_MS, SETTLE_AFTER_CHANGE_MS, BACKOFF_START_MS, BACKOFF_MAX_MS };
