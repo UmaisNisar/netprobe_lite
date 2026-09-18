@@ -1,7 +1,7 @@
 name: Desktop CI
 
-# Lint, unit tests with coverage, an end-to-end Electron smoke test and a
-# packaging check on every OS. Also called by the release workflow so a
+# Lint, unit tests with coverage, an Electron smoke test, UI end-to-end
+# tests and a packaging check on every OS. Also called by the release workflow so a
 # release can't ship without passing it.
 
 on:
@@ -91,6 +91,15 @@ jobs:
             xvfb-run --auto-servernum npx electron scripts/smoke.js
           else
             npx electron scripts/smoke.js
+          fi
+
+      - name: UI end-to-end tests
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run --auto-servernum npm run test:e2e
+          else
+            npm run test:e2e
           fi
 
       - name: Package (unsigned)

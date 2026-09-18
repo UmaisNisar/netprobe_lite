@@ -249,6 +249,7 @@ npm start            # run in development
 npm test             # unit tests
 npm run check        # lint + unit tests with coverage thresholds
 npm run smoke        # boot the real app, run one probe end to end, exit
+npm run test:e2e     # UI tests: the real app driven with Playwright (fake network)
 npm run dist:win     # -> dist/Netprobe-Setup.exe + Netprobe-Portable.exe
 npm run dist:mac     # -> dist/Netprobe-mac-arm64.dmg + Netprobe-mac-x64.dmg (must run on macOS)
 npm run dist:linux   # -> dist/Netprobe-linux.AppImage
@@ -272,18 +273,20 @@ npm run dist:linux   # -> dist/Netprobe-linux.AppImage
 | `test/trace.test.js` | Traceroute per OS, partial output, missing tools |
 | `test/settings.test.js` | Defaults, first-run DNS detection, validation and clamping, corrupt files, persistence |
 | `test/renderer-lib.test.js` | Dashboard formatting, colour levels, chart data pivoting and gap handling, HTML escaping |
+| `test/monitor.test.js` | The engine with a fake clock and network: scheduling, detection timeout, auto DNS, incidents with traceroute, network changes, sleep/wake and silent sleeps, pause, speed-test interval/times/back-off/budget, settings changes, crash recovery |
+| `test/e2e/ui.test.js` | The real app driven with Playwright: first-run welcome, live results and accessibility labels, settings saved and reloaded, DNS "auto" rules, history range and filter, export dialog, speed test with plan % and bufferbloat, a full outage scenario |
 | `test/metrics.test.js` | Prometheus output: original metric names/labels (Grafana compatibility), new metrics, missing values, escaping |
 | `test/server.test.js` | Web server: pages and assets, JSON API, CSV/report, SSE, actions, bad input, read-only viewers, token auth and cookies |
 | `test/service.test.js` | Data-folder lock (stale locks, other processes), headless CLI start/stop, updater version logic and both update modes |
 | `scripts/smoke.js` | Launches the real Electron app and checks a first-run profile shows the welcome screen, the dashboard loads without errors, a full probe is stored and rendered, the web dashboard and `/metrics` are served over HTTP, and a PDF report renders |
 
-Coverage minimums (90% lines, 90% functions, 80% branches) are enforced by `npm run check`. `main.js`, `monitor.js`, `preload.js` and `app.js` are covered by the smoke test instead.
+Coverage minimums (90% lines, 90% functions, 80% branches) are enforced by `npm run check`. The Electron-only files (`main.js`, `preload.js`, `app.js`) are covered by the smoke and UI tests instead.
 
 ### CI/CD
 
 - **[Desktop CI](.github/workflows/desktop-ci.yml)** runs on every push and pull request that touches `desktop/`:
   - lint plus unit tests with coverage on Node 22 and 24
-  - unit tests, the Electron smoke test and an unsigned packaging check on Windows, macOS and Linux
+  - unit tests, the Electron smoke test, the UI end-to-end tests and an unsigned packaging check on Windows, macOS and Linux
   - installers uploaded as build artifacts for 7 days
 - **[Desktop release](.github/workflows/desktop-release.yml)** runs when a `desktop-v<semver>` tag is pushed:
   - checks the tag format
