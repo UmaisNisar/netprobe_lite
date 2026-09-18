@@ -63,7 +63,13 @@ jobs:
       - name: Stamp version from tag
         run: npm version ${{ needs.version.outputs.version }} --no-git-tag-version --allow-same-version
       - name: Build
-        run: npm run ${{ matrix.dist }}
+        shell: bash
+        # An unset secret arrives as an empty string, which electron-builder
+        # would treat as a certificate path; unset empty ones.
+        run: |
+          [ -n "$CSC_LINK" ] || unset CSC_LINK CSC_KEY_PASSWORD
+          [ -n "$APPLE_ID" ] || unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+          npm run ${{ matrix.dist }}
         env:
           # Code signing is optional: add these repository secrets to sign
           # (see "Code signing" in the README). Without them builds are unsigned.
