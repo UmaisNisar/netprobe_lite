@@ -54,6 +54,8 @@ app.whenReady().then(async () => {
   if (win.webContents.isLoading()) await new Promise((r) => win.webContents.once('did-finish-load', r));
   const js = (code) => win.webContents.executeJavaScript(code);
 
+  // The welcome screen opens once the first state arrives; give it a moment.
+  for (let i = 0; i < 50 && !(await js(`document.querySelector('#welcome')?.open`)); i++) await sleep(200);
   const ui = await js(`({
     lib: typeof window.NetprobeLib?.pivot === 'function',
     bridge: typeof window.netprobe?.getState === 'function',
