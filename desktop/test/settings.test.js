@@ -196,3 +196,31 @@ test('schedule, plan and budget are validated', () => {
   assert.strictEqual(s.speedtestBudgetGB, 50);
   assert.strictEqual(validate({ ...defaults(), speedtestSchedule: 'times' }).speedtestSchedule, 'times');
 });
+
+// ------------------------------------------------------------ 1.3 additions
+
+test('web server, auto-update and onboarding defaults', () => {
+  const d = defaults();
+  assert.deepStrictEqual(d.server, { enabled: false, port: 7979, lan: false, token: '' });
+  assert.strictEqual(d.autoUpdate, true);
+  assert.strictEqual(d.onboarded, false);
+});
+
+test('web server settings are validated', () => {
+  const s = validate({ ...defaults(), server: { enabled: 1, port: 80, lan: 'yes', token: `  ${'x'.repeat(200)}  ` } });
+  assert.deepStrictEqual({ ...s.server, token: s.server.token.length }, { enabled: true, port: 1024, lan: true, token: 128 });
+  assert.strictEqual(validate({ ...defaults(), server: { port: 'x' } }).server.port, 7979);
+});
+
+test('first run shows the welcome; installs from before it existed skip it', (t) => {
+  const fresh = tempDir(t);
+  assert.strictEqual(new Settings(fresh).get().onboarded, false);
+  const old = tempDir(t);
+  fs.writeFileSync(path.join(old, 'settings.json'), JSON.stringify({ sites: ['a.com'] }));
+  assert.strictEqual(new Settings(old).get().onboarded, true);
+});
+
+test('auto-update can be switched off; the old Wi-Fi banner setting is dropped', () => {
+  assert.strictEqual(validate({ ...defaults(), autoUpdate: false }).autoUpdate, false);
+  assert.ok(!('wifiWarning' in validate({ ...defaults(), wifiWarning: true })));
+});

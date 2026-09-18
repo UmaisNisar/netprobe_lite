@@ -100,8 +100,9 @@ class Monitor extends EventEmitter {
     // The first probe needs the router and auto DNS, so wait for detection
     // (bounded, in case it hangs).
     const detected = this.refreshConnection().catch(() => {});
-    const timeout = new Promise((r) => deps.setTimeout(r, 15_000));
+    const timeout = new Promise((r) => (this.timers.ready = deps.setTimeout(r, 15_000)));
     this.ready = Promise.race([detected, timeout]).then(() => {
+      deps.clearTimeout(this.timers.ready);
       if (!this.stopped) this.scheduleProbe(0);
     });
     this.scheduleSpeedtest();
@@ -110,6 +111,7 @@ class Monitor extends EventEmitter {
   stop() {
     const { deps } = this;
     this.stopped = true;
+    deps.clearTimeout(this.timers.ready);
     deps.clearTimeout(this.timers.probe);
     deps.clearTimeout(this.timers.speed);
     deps.clearInterval(this.timers.prune);

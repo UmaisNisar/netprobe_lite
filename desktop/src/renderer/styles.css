@@ -84,11 +84,16 @@ h3 { font-size: 13px; margin: 0 0 8px; font-weight: 600; color: var(--muted); }
 }
 .btn:hover:not(:disabled) { border-color: var(--muted); }
 .btn:disabled { opacity: .5; cursor: default; }
+.btn:focus-visible, .segmented button:focus-visible, select:focus-visible, .chip:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn-primary:hover:not(:disabled) { filter: brightness(1.08); border-color: var(--accent); }
 .btn-danger { color: var(--bad); }
 .btn-ghost { background: none; border-color: transparent; }
 .btn-small { padding: 4px 10px; font-size: 12px; }
+.btn-update { border-color: var(--good); color: var(--good); }
 
 /* ---------- connection chip */
 
@@ -205,13 +210,17 @@ table.targets { width: 100%; border-collapse: collapse; font-variant-numeric: ta
 .v-good { color: var(--good); }
 .v-ok { color: var(--ok); }
 .v-bad { color: var(--bad); }
+/* Don't rely on colour alone: mark bad values in tables with a symbol too. */
+.targets td.v-bad::after { content: ' \26A0'; font-size: .85em; }
+.zoom-hint { flex: 1; text-align: right; }
+@media (max-width: 800px) { .zoom-hint { display: none; } }
 
 .segmented { display: inline-flex; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
 .segmented button { font: inherit; font-size: 12px; background: none; border: 0; color: var(--muted); padding: 4px 12px; border-radius: 6px; cursor: pointer; }
 .segmented button.active { background: var(--surface-2); color: var(--text); }
 
 .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.chart { height: 240px; position: relative; }
+.chart { min-height: 240px; position: relative; }
 .chart .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
 
 /* uPlot theming */
@@ -264,6 +273,19 @@ input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
 .dns-row { display: grid; grid-template-columns: 1fr 1fr auto auto auto; gap: 6px; align-items: center; }
 .dns-row label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
 .grid4 { display: grid; grid-template-columns: 1fr 90px 90px 0; gap: 6px 10px; align-items: center; font-size: 13px; }
+
+.token-row { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+.readonly-note { font-size: 12px; color: var(--muted); border: 1px dashed var(--border); border-radius: 8px; padding: 8px 12px; }
+
+/* ---------- welcome */
+
+dialog.welcome { width: min(560px, calc(100vw - 32px)); }
+.welcome-head { display: flex; gap: 14px; align-items: flex-start; }
+.welcome-head img { border-radius: 9px; flex: none; }
+.welcome-step { border-top: 1px solid var(--border); padding-top: 12px; display: grid; gap: 8px; }
+.welcome-step h3 { margin: 0; color: var(--text); font-size: 13px; }
+.welcome-conn { font-size: 13px; }
+.welcome-conn strong { font-weight: 600; }
 
 /* ---------- export modal */
 

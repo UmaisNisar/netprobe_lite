@@ -6,6 +6,9 @@ const { app, BrowserWindow, Tray, Menu, Notification, dialog, ipcMain, nativeIma
 const fs = require('node:fs');
 const path = require('node:path');
 const report = require('./report');
+const { createServer, lanAddresses } = require('./server');
+const lock = require('./lock');
+const { Updater } = require('./updater');
 const { Settings } = require('./settings');
 const { Store } = require('./db');
 const { Monitor } = require('./monitor');
@@ -13,6 +16,9 @@ const { LOCATIONS, formatDuration } = require('../renderer/lib');
 
 const ASSETS = path.join(__dirname, '..', '..', 'assets');
 let startHidden = process.argv.includes('--hidden');
+// --headless: no window or tray, just monitoring + the web dashboard (for
+// running the packaged app as a background service).
+const headless = process.argv.includes('--headless');
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -24,6 +30,11 @@ let monitor;
 let win = null;
 let tray = null;
 let quitting = false;
+let server = null;
+let heldLock = null;
+let updater = null;
+let updateState = null;
+const notifiedVersions = new Set();
 
 // ---------------------------------------------------------------- UI
 
@@ -109,6 +120,7 @@ function updateTray(state) {
       { label: 'Probe now', enabled: !state.paused, click: () => monitor.runProbe() },
       { label: 'Run speed test now', click: () => monitor.runSpeedtest() },
       { label: state.paused ? 'Resume monitoring' : 'Pause monitoring', click: () => monitor.togglePause() },
+      ...updateMenu(),
       { type: 'separator' },
       { label: 'Quit Netprobe', click: () => { quitting = true; app.quit(); } },
     ])
@@ -130,6 +142,82 @@ function notifyIncident({ type, incident }) {
         });
   n.on('click', showWindow);
   n.show();
+}
+
+// ---------------------------------------------------------------- updates
+
+function updateMenu() {
+  if (updateState?.status === 'ready') return [{ type: 'separator' }, { label: `Restart to update to ${updateState.version}`, click: installUpdate }];
+  if (updateState?.status === 'available') {
+    return [{ type: 'separator' }, { label: `Download Netprobe ${updateState.version}`, click: () => shell.openExternal(updateState.url) }];
+  }
+  return [];
+}
+
+function installUpdate() {
+  quitting = true;
+  updater?.install();
+}
+
+function applyUpdater() {
+  const want = app.isPackaged && settings.get().autoUpdate;
+  if (want && !updater) {
+    updater = new Updater({ currentVersion: app.getVersion() });
+    updater.on('state', (s) => {
+      updateState = s;
+      if ((s.status === 'ready' || s.status === 'available') && !notifiedVersions.has(s.version) && Notification.isSupported()) {
+        notifiedVersions.add(s.version);
+        const n = new Notification({
+          title: s.status === 'ready' ? `Netprobe ${s.version} is ready` : `Netprobe ${s.version} is available`,
+          body: s.status === 'ready' ? 'Restart Netprobe to finish updating.' : 'Click to download the new version.',
+        });
+        n.on('click', () => (s.status === 'ready' ? showWindow() : shell.openExternal(s.url)));
+        n.show();
+      }
+      monitor.emit('state', monitor.publicState());
+    });
+    updater.start();
+  } else if (!want && updater) {
+    updater.stop();
+    updater = null;
+    updateState = null;
+  }
+}
+
+// ---------------------------------------------------------------- web server
+
+function saveSettings(next) {
+  const before = settings.get();
+  const saved = settings.set(next);
+  monitor.applySettings(before, saved);
+  applyLoginItem();
+  applyUpdater();
+  const changed = ['enabled', 'port', 'lan', 'token'].some((k) => before.server[k] !== saved.server[k]);
+  if (changed) applyServer();
+  return saved;
+}
+
+// (Re)starts or stops the web server to match settings. Headless mode always
+// runs it.
+function applyServer() {
+  const cfg = settings.get().server;
+  if (server) {
+    server.close();
+    server = null;
+  }
+  monitor.serverInfo = null;
+  if (!cfg.enabled && !headless) return monitor.emit('state', monitor.publicState());
+  const host = cfg.lan ? '0.0.0.0' : '127.0.0.1';
+  server = createServer({ monitor, saveSettings, token: cfg.token || null, log: (m) => console.error(m) });
+  server.on('error', (e) => {
+    monitor.serverInfo = { error: e.code === 'EADDRINUSE' ? `Port ${cfg.port} is already in use.` : e.message };
+    monitor.emit('state', monitor.publicState());
+  });
+  server.listen(cfg.port, host, () => {
+    const hosts = cfg.lan ? ['localhost', ...lanAddresses()] : ['localhost'];
+    monitor.serverInfo = { urls: hosts.map((h) => `http://${h}:${cfg.port}/`), lan: cfg.lan };
+    monitor.emit('state', monitor.publicState());
+  });
 }
 
 function applyLoginItem() {
@@ -199,22 +287,20 @@ async function exportReport({ from, to, format }) {
 ipcMain.handle('get-state', () => monitor.publicState());
 ipcMain.handle('get-history', (_e, rangeMs, conn) => monitor.history(rangeMs, conn));
 ipcMain.handle('get-incidents', (_e, rangeMs) => monitor.incidents(rangeMs));
-ipcMain.handle('save-settings', (_e, next) => {
-  const before = settings.get();
-  const saved = settings.set(next);
-  monitor.applySettings(before, saved);
-  applyLoginItem();
-  return saved;
-});
+ipcMain.handle('save-settings', (_e, next) => saveSettings(next));
 ipcMain.handle('probe-now', () => monitor.runProbe());
 ipcMain.handle('speedtest-now', () => monitor.runSpeedtest());
 ipcMain.handle('toggle-pause', () => monitor.togglePause());
 ipcMain.handle('clear-history', () => monitor.clearHistory());
 ipcMain.handle('export-report', (_e, opts) => exportReport(opts));
+ipcMain.handle('install-update', () => installUpdate());
+ipcMain.handle('open-update', () => updateState?.url && shell.openExternal(updateState.url));
 
 // ---------------------------------------------------------------- lifecycle
 
-app.on('second-instance', showWindow);
+app.on('second-instance', () => {
+  if (!headless) showWindow();
+});
 app.on('before-quit', () => (quitting = true));
 app.on('window-all-closed', (e) => e.preventDefault()); // Keep running in tray.
 app.on('activate', showWindow); // macOS dock click.
@@ -224,8 +310,20 @@ app.whenReady().then(() => {
   // macOS ignores login-item args, so detect a login launch directly.
   if (process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin) startHidden = true;
   const dataDir = app.getPath('userData');
+  try {
+    heldLock = lock.acquire(dataDir);
+  } catch (e) {
+    if (e.code !== 'ELOCKED') throw e;
+    dialog.showErrorBox('Netprobe is already running', `${e.message}\n\nIf Netprobe is running as a background service, open its web dashboard instead.`);
+    app.exit(1);
+    return;
+  }
   settings = new Settings(dataDir);
   monitor = new Monitor({ settings, store: new Store(dataDir) });
+
+  // The web server's URLs ride along with the state for the Settings screen.
+  const publicState = monitor.publicState.bind(monitor);
+  monitor.publicState = () => ({ ...publicState(), server: monitor.serverInfo ?? null, update: updateState, version: app.getVersion() });
 
   monitor.on('state', (state) => {
     updateTray(state);
@@ -236,16 +334,22 @@ app.whenReady().then(() => {
   powerMonitor.on('suspend', () => monitor.suspend());
   powerMonitor.on('resume', () => monitor.resume());
 
-  tray = new Tray(trayIcon('idle'));
-  tray.on('click', showWindow);
-  updateTray(monitor.publicState());
-
-  createWindow();
-  applyLoginItem();
+  if (!headless) {
+    tray = new Tray(trayIcon('idle'));
+    tray.on('click', showWindow);
+    updateTray(monitor.publicState());
+    createWindow();
+    applyLoginItem();
+  }
+  applyServer();
+  applyUpdater();
   monitor.start();
 });
 
 app.on('will-quit', () => {
+  updater?.stop();
+  server?.close();
   monitor?.stop();
   monitor?.store.close();
+  heldLock?.release();
 });

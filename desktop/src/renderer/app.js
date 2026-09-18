@@ -28,13 +28,24 @@ function scoreColor(score) {
 
 // ------------------------------------------------------------ live state
 
+const RATING = { 'v-good': 'good', 'v-ok': 'fair', 'v-bad': 'poor' };
+
 function setValue(id, value, unit, cls = '') {
   const el = $(id);
   el.className = `stat-value ${cls}`;
   el.innerHTML = value === '–' ? '–' : `${value}<small>${unit}</small>`;
+  // Screen readers get the rating that sighted users read from the colour.
+  const label = el.closest('.stat').querySelector('.card-label').textContent;
+  el.setAttribute('aria-label', value === '–' ? `${label}: no data` : `${label}: ${value} ${unit}${RATING[cls] ? `, ${RATING[cls]}` : ''}`);
 }
 
 const CONN_LABEL = { wifi: 'Wi-Fi', wired: 'Wired', vpn: 'VPN' };
+
+// The adapter name, unless it just repeats the type ("Wi-Fi", "WiFi").
+function distinctName(conn) {
+  const letters = (v) => String(v ?? '').replace(/[^a-z]/gi, '').toLowerCase();
+  return conn.name && letters(conn.name) !== letters(CONN_LABEL[conn.type]) ? conn.name : null;
+}
 
 function renderConnection() {
   const conn = state.connection || { type: 'unknown' };
@@ -77,7 +88,7 @@ function renderPath() {
     $(`#p-${seg}`).textContent = text;
   };
   const label = CONN_LABEL[conn.type];
-  const showName = conn.name && conn.name.replace(/[^a-z]/gi, '').toLowerCase() !== (label ?? '').replace(/[^a-z]/gi, '').toLowerCase();
+  const showName = distinctName(conn);
   const connText = label ? `${label}${showName ? ` · ${conn.name}` : ''}` : 'Connection type unknown';
   set('computer', conn.type === 'unknown' ? 'unknown' : 'ok', connText);
   if (!latest) {
@@ -196,6 +207,7 @@ function renderState() {
   fill.style.opacity = score == null ? 0 : 1; // round caps would draw a dot at 0
   $('#score').textContent = score == null ? '–' : Math.round(score * 100);
   $('#score-caption').textContent = score == null ? 'Waiting for the first probe' : scoreCaption(score);
+  $('#gauge').setAttribute('aria-label', score == null ? 'Internet Quality Score not measured yet' : `Internet Quality Score ${Math.round(score * 100)} percent: ${scoreCaption(score)}`);
 
   // Stat cards
   setValue('#s-latency', fmt(sum?.latency), 'ms', level(sum?.latency, t.latency));
@@ -255,13 +267,26 @@ function renderState() {
   renderPath();
   renderUptime();
 
-  // Buttons
-  $('#btn-probe').disabled = state.probing || state.speedtesting || state.paused;
-  $('#btn-speed').disabled = state.speedtesting;
+  // Buttons (read-only when viewing another computer's Netprobe in a browser)
+  const readOnly = api.web && state.web && !state.web.canWrite;
+  $('#readonly-note').hidden = !readOnly;
+  for (const id of ['#btn-pause', '#btn-settings']) $(id).disabled = readOnly;
+  $('#btn-probe').disabled = readOnly || state.probing || state.speedtesting || state.paused;
+  $('#btn-speed').disabled = readOnly || state.speedtesting;
   $('#btn-speed').textContent = state.speedtesting ? 'Testing…' : 'Speed test';
   $('#btn-pause').textContent = state.paused ? 'Resume' : 'Pause';
 
+  renderUpdate();
   renderStatus();
+}
+
+function renderUpdate() {
+  const u = state.update;
+  const btn = $('#btn-update');
+  btn.hidden = !u || !['ready', 'available'].includes(u.status) || !!api.web;
+  if (btn.hidden) return;
+  btn.textContent = u.status === 'ready' ? `Restart to update (${u.version})` : `Update available (${u.version})`;
+  btn.title = u.status === 'ready' ? 'The new version is downloaded. Netprobe restarts in a few seconds.' : 'Opens the download page.';
 }
 
 
@@ -308,8 +333,8 @@ function makeChart(el, { xs, series, yRange, points = false }) {
   const axis = { stroke: c.text, grid: { stroke: c.grid, width: 1 }, ticks: { stroke: c.grid, width: 1 } };
   const opts = {
     width: el.clientWidth,
-    height: el.clientHeight - 30,
-    cursor: { sync: { key: 'np' }, points: { size: 6 } },
+    height: PLOT_HEIGHT,
+    cursor: { sync: { key: 'np' }, points: { size: 6 }, drag: { x: true, y: false, setScale: true } },
     legend: { live: true },
     plugins: [incidentBands()],
     scales: { x: { time: true }, y: yRange ? { range: yRange } : { auto: true } },
@@ -328,7 +353,16 @@ function makeChart(el, { xs, series, yRange, points = false }) {
       })),
     ],
   };
-  return new uPlot(opts, [xs, ...series.map((s) => s.data)], el);
+  const u = new uPlot(opts, [xs, ...series.map((s) => s.data)], el);
+  fitToLegend(u, el);
+  return u;
+}
+
+// Plots keep a fixed height; the card grows when the legend wraps onto
+// extra lines (many sites), instead of the legend squeezing the plot.
+const PLOT_HEIGHT = 220;
+function fitToLegend(u, el) {
+  u.setSize({ width: el.clientWidth, height: PLOT_HEIGHT });
 }
 
 function withAverage(p, runs, field, gapMs) {
@@ -420,8 +454,7 @@ function mergeTraces(list) {
 const resizeObserver = new ResizeObserver(() => {
   for (const u of charts) {
     if (!u) continue;
-    const el = u.root.parentElement;
-    u.setSize({ width: el.clientWidth, height: el.clientHeight - 30 });
+    fitToLegend(u, u.root.parentElement);
   }
 });
 document.querySelectorAll('.chart').forEach((el) => resizeObserver.observe(el));
@@ -439,7 +472,10 @@ $('#conn-filter').addEventListener('change', (e) => {
 $('#range').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-range]');
   if (!btn) return;
-  document.querySelectorAll('#range button').forEach((b) => b.classList.toggle('active', b === btn));
+  document.querySelectorAll('#range button').forEach((b) => {
+    b.classList.toggle('active', b === btn);
+    b.setAttribute('aria-selected', String(b === btn));
+  });
   rangeMs = Number(btn.dataset.range);
   loadHistory();
 });
@@ -449,6 +485,7 @@ $('#range').addEventListener('click', (e) => {
 $('#btn-probe').addEventListener('click', () => api.probeNow());
 $('#btn-speed').addEventListener('click', () => api.speedtestNow());
 $('#btn-pause').addEventListener('click', () => api.togglePause());
+$('#btn-update').addEventListener('click', () => (state.update?.status === 'ready' ? api.installUpdate() : api.openUpdate()));
 
 // ------------------------------------------------------------ settings
 
@@ -484,6 +521,21 @@ function syncAutoBoxes() {
   }
 }
 
+function renderServerHint() {
+  const info = state?.server;
+  let text;
+  if (api.web) text = 'You are viewing this dashboard through the web server.';
+  else if (info?.error) text = `Web server error: ${info.error}`;
+  else if (info?.urls) text = `Running at ${info.urls.join('  ·  ')}  (metrics at /metrics)`;
+  else text = 'Other devices, or Grafana/Prometheus, can use this while the app runs. For 24/7 use, see "Always-on mode" in the README.';
+  $('#server-hint').textContent = text;
+}
+
+$('#token-new').addEventListener('click', () => {
+  const bytes = crypto.getRandomValues(new Uint8Array(18));
+  form.serverToken.value = btoa(String.fromCharCode(...bytes)).replace(/[+/=]/g, (c) => ({ '+': '-', '/': '_', '=': '' })[c]);
+});
+
 function updateWeightSum() {
   const sum = ['loss', 'latency', 'jitter', 'dnsLatency'].reduce((a, k) => a + (Number(form[`w.${k}`].value) || 0), 0);
   const el = $('#weight-sum');
@@ -513,6 +565,15 @@ function openSettings() {
   for (const k of Object.keys(s.weights)) form[`w.${k}`].value = s.weights[k];
   for (const k of Object.keys(s.thresholds)) form[`t.${k}`].value = s.thresholds[k];
   form.openAtLogin.checked = s.openAtLogin;
+  form.openAtLogin.closest('label').hidden = !!api.web; // not meaningful in a browser
+  form.autoUpdate.checked = s.autoUpdate;
+  form.autoUpdate.closest('label').hidden = !!api.web;
+  $('#version-hint').textContent = state.version ? `Version ${state.version}${state.update?.status === 'error' ? ' · last update check failed' : ''}` : '';
+  form.serverEnabled.checked = s.server.enabled;
+  form.serverPort.value = s.server.port;
+  form.serverLan.checked = s.server.lan;
+  form.serverToken.value = s.server.token;
+  renderServerHint();
   form.alertsNotify.checked = s.alerts.notify;
   form.degradedScore.value = Math.round(s.alerts.degradedScore * 100);
   form.degradedLoss.value = s.alerts.degradedLoss;
@@ -552,6 +613,13 @@ form.addEventListener('submit', async (e) => {
     weights: { loss: num('w.loss'), latency: num('w.latency'), jitter: num('w.jitter'), dnsLatency: num('w.dnsLatency') },
     thresholds: { loss: num('t.loss'), latency: num('t.latency'), jitter: num('t.jitter'), dnsLatency: num('t.dnsLatency') },
     openAtLogin: form.openAtLogin.checked,
+    autoUpdate: form.autoUpdate.checked,
+    server: {
+      enabled: form.serverEnabled.checked,
+      port: num('serverPort'),
+      lan: form.serverLan.checked,
+      token: form.serverToken.value,
+    },
     alerts: { notify: form.alertsNotify.checked, degradedScore: num('degradedScore') / 100, degradedLoss: num('degradedLoss') },
     retentionDays: num('retentionDays'),
   };
@@ -618,11 +686,69 @@ exportForm.addEventListener('submit', async (e) => {
   }
 });
 
+// ------------------------------------------------------------ welcome
+
+const welcome = $('#welcome');
+const welcomeForm = $('#welcome-form');
+
+function renderWelcomeConnection() {
+  const c = state.connection;
+  const parts = [];
+  if (c.type === 'unknown' && !c.gateway) parts.push('Still detecting your connection…');
+  else {
+    const name = distinctName(c);
+    parts.push(`<strong>${esc(CONN_LABEL[c.type] ?? 'Unknown connection')}</strong>${name ? ` (${esc(name)})` : ''}`);
+    if (c.gateway) parts.push(`router ${esc(c.gateway)}`);
+    if (c.dns?.length) parts.push(`DNS ${esc(c.dns[0])}`);
+  }
+  $('#welcome-conn').innerHTML = parts.join(' · ');
+  $('#welcome-conn-tip').textContent =
+    c.type === 'wifi'
+      ? "You're on Wi-Fi, so results will include your wireless signal as well as your ISP. For ISP-only measurements, use an Ethernet cable."
+      : c.type === 'vpn'
+        ? 'A VPN is active, so results will measure the VPN path. Turn it off to measure your ISP.'
+        : '';
+}
+
+function maybeWelcome() {
+  if (api.web || state.settings.onboarded || welcome.open) return;
+  const s = state.settings;
+  welcomeForm.speedtestEnabled.checked = s.speedtestEnabled;
+  welcomeForm.planDown.value = s.planDown || '';
+  welcomeForm.planUp.value = s.planUp || '';
+  welcomeForm.alertsNotify.checked = s.alerts.notify;
+  welcomeForm.openAtLogin.checked = s.openAtLogin;
+  renderWelcomeConnection();
+  welcome.showModal();
+}
+
+welcomeForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const s = state.settings;
+  await api.saveSettings({
+    ...s,
+    onboarded: true,
+    speedtestEnabled: welcomeForm.speedtestEnabled.checked,
+    planDown: Number(welcomeForm.planDown.value) || 0,
+    planUp: Number(welcomeForm.planUp.value) || 0,
+    alerts: { ...s.alerts, notify: welcomeForm.alertsNotify.checked },
+    openAtLogin: welcomeForm.openAtLogin.checked,
+  });
+  welcome.close();
+});
+// Escape shouldn't skip it silently: treat closing as "keep the defaults".
+welcome.addEventListener('cancel', (e) => {
+  e.preventDefault();
+  welcomeForm.requestSubmit();
+});
+
 // ------------------------------------------------------------ boot
 
 function onState(next) {
   state = next;
   renderState();
+  if (welcome.open) renderWelcomeConnection();
+  else maybeWelcome();
   const probeTs = state.latest?.ts ?? null;
   const speedTs = state.speed?.ts ?? null;
   if (probeTs !== lastProbeTs || speedTs !== lastSpeedTs) {

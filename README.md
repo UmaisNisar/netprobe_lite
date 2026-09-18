@@ -27,7 +27,7 @@ All releases: [github.com/UmaisNisar/netprobe_lite/releases](https://github.com/
 
 ### First launch: security warnings
 
-The builds are not code-signed (signing certificates cost money), so your OS will warn you the first time you open the app:
+The builds are not code-signed yet (signing certificates cost money; see [Code signing](#code-signing)), so your OS will warn you the first time you open the app:
 
 - **Windows:** SmartScreen shows "Windows protected your PC". Click **More info → Run anyway**.
 - **macOS:** You may see "Netprobe can't be opened" or "is damaged". Open **System Settings → Privacy & Security** and click **Open Anyway**, or run this once in Terminal:
@@ -44,6 +44,9 @@ The builds are not code-signed (signing certificates cost money), so your OS wil
 - **A report you can send your ISP.** **Export report** creates a PDF with plain-language findings ("uptime 99.4%: 3 outages totalling 22 min; most located at your ISP"), charts, an incident list with likely causes, a day-by-day table and speed tests compared with your plan. It can also export the raw data as CSV.
 - **Measures what matters.** It reports 95th-percentile latency, not just averages (spikes are what ruin calls), and full uncached DNS lookups as well as cached ones. Speed tests measure **latency under load (bufferbloat)** and grade it A+ to F.
 - **Speed tests on your terms.** Enter your plan's speeds to see results as a % of what you pay for. Run tests every N minutes or at set times of day (e.g. peak vs off-peak), and cap how much data automatic tests may use each month.
+- **Always on, if you want.** Share the dashboard with other devices on your network, run Netprobe headless on a home server or Raspberry Pi, and point Prometheus/Grafana at `/metrics`. The original Grafana dashboard works unchanged. See [Always-on mode](#always-on-mode).
+- **Keeps itself up to date.** New versions install in the background on Windows and Linux (on restart). On macOS you get a notification with a download link.
+- **Guided first run.** A short welcome screen shows your detected connection, router and DNS, and asks about speed tests, your plan, notifications and start-at-login.
 - **Runs in the tray.** Closing the window keeps monitoring. The tray icon turns green, amber or red with your score, and hovering it shows the current numbers.
 - **Starts at login** (optional, on by default) so history builds up without you thinking about it.
 - **Live dashboard:** a score gauge, current latency, loss, jitter, DNS and bandwidth, plus a per-site and per-DNS-server breakdown of the latest probe.
@@ -103,7 +106,7 @@ score = 1 − 0.60 × min(loss / 5%, 1)
 
 - **Use a wired connection if you can.** On Wi-Fi you're measuring your Wi-Fi *plus* your ISP. That's still useful, and the router check tells you when Wi-Fi is the culprit, but for the cleanest ISP data run it on a PC connected to your router by Ethernet. The top-bar chip shows which kind of connection your internet traffic is using.
 - **Turn off your VPN.** With a VPN on, every measurement goes through the VPN server, so it says nothing about your ISP.
-- **Leave it running.** Netprobe only records while your computer is on. For 24/7 coverage, run it on an always-on machine, or use the [original Docker version](docs/DOCKER.md) on a home server.
+- **Leave it running.** Netprobe only records while the computer is on. For 24/7 coverage, use [always-on mode](#always-on-mode) on a machine that never sleeps.
 - **Some sites ignore ping.** amazon.com and netflix.com, for example, block ICMP. A site that answers no pings while others do is marked **no reply** and left out of the score. If *every* site goes silent, that's an outage and counts as 100% loss.
 - **Speed tests use data.** A test uses about 200 MB on a 100 Mbps line and at most ~1 GB on gigabit+. At the default ~15-minute interval that adds up, so leave it off on metered or mobile connections, use set times of day instead, or set a monthly data budget. If Cloudflare rate-limits the tests, Netprobe backs off automatically (30 min, doubling up to 4 h).
 
@@ -126,8 +129,81 @@ Click **Settings** in the top-right corner of the dashboard.
 | Notifications | On | Desktop notification when an incident starts and ends |
 | Slowdown thresholds | score < 60% or loss ≥ 2% | What counts as a bad probe |
 | Keep history for | 30 days | Older data is deleted automatically |
+| Web dashboard & metrics | Off | Serves the dashboard and `/metrics` on port 7979; optionally to other devices, with an optional access token |
+| Keep up to date | On | Checks GitHub Releases every 6 hours |
 
-The tray menu also has **Probe now**, **Run speed test now**, **Pause monitoring** and **Quit**.
+The tray menu also has **Probe now**, **Run speed test now**, **Pause monitoring**, **Restart to update** (when an update is ready) and **Quit**.
+
+## Always-on mode
+
+A laptop that sleeps can't tell you about the outage at 3 a.m. Netprobe can also run 24/7 and serve its dashboard over HTTP.
+
+**From the desktop app:** Settings → *Web dashboard & metrics* → turn it on. Tick *Allow other devices on my network* to open it from your phone (`http://<this-computer>:7979/`).
+
+**Headless, on a home server, NAS or Raspberry Pi** (needs [Node.js](https://nodejs.org/) 22.13+, no Electron):
+
+```sh
+git clone https://github.com/UmaisNisar/netprobe_lite.git
+cd netprobe_lite/desktop && npm ci --omit=dev
+node src/cli.js --host 0.0.0.0 --port 7979            # add --token <secret> to require a token
+```
+
+**With the packaged app, no window:** `Netprobe --headless` (Windows: `"%LOCALAPPDATA%\Programs\Netprobe\Netprobe.exe" --headless`). It uses the web dashboard settings.
+
+Run it as a service so it starts on boot:
+
+<details>
+<summary>Linux (systemd)</summary>
+
+```ini
+# /etc/systemd/system/netprobe.service
+[Unit]
+Description=Netprobe
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/node /opt/netprobe_lite/desktop/src/cli.js --host 0.0.0.0 --port 7979
+Environment=NETPROBE_DATA=/var/lib/netprobe
+Restart=always
+User=netprobe
+
+[Install]
+WantedBy=multi-user.target
+```
+Then run `sudo systemctl enable --now netprobe`.
+</details>
+
+<details>
+<summary>Windows (Task Scheduler)</summary>
+
+Create a task that runs at startup, whether or not a user is logged on, with the action
+`"C:\Users\<you>\AppData\Local\Programs\Netprobe\Netprobe.exe" --headless`. Turn on the web dashboard in Settings first, so you can reach it.
+</details>
+
+<details>
+<summary>macOS (launchd)</summary>
+
+Save as `~/Library/LaunchAgents/com.netprobe.headless.plist` and run `launchctl load` on it:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.netprobe.headless</string>
+  <key>ProgramArguments</key><array>
+    <string>/Applications/Netprobe.app/Contents/MacOS/Netprobe</string><string>--headless</string>
+  </array>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+</dict></plist>
+```
+</details>
+
+**Access:** without a token, other devices can *view* the dashboard, but only the machine running Netprobe can change settings, pause or clear history. With a token (`--token`, or Settings → *Access token*), every other device needs it. Open `http://host:7979/?token=<token>` once in each browser, or send it as `Authorization: Bearer <token>`. In a browser, **Export report** opens the report and your browser's *Save as PDF*.
+
+**Prometheus / Grafana:** scrape `http://host:7979/metrics`. The `Network_Stats`, `DNS_Stats`, `Speed_Stats` and `Health_Stats` metrics use the same names and labels as the original exporter, so [the original Grafana dashboard](config/grafana/dashboards/netprobe.json) works as is. New `netprobe_*` metrics add router/ISP-hop latency and loss, p95 latency, uncached DNS, uptime, open incidents, connection type and bufferbloat.
+
+Only one Netprobe (desktop or headless) can use a given data folder at a time.
 
 ### Where data is stored
 
@@ -145,7 +221,7 @@ It contains `settings.json` and `netprobe.db` (SQLite). Delete the folder to res
 |---|---|---|
 | Install | Docker + `docker compose up` | Download and run an installer |
 | Components | 6 containers: Python probe, speed test, Redis, exporter, Prometheus, Grafana | 1 app (Electron) |
-| Dashboard | Grafana at `http://<ip>:3001`, login `admin/admin` | Built-in window + tray icon |
+| Dashboard | Grafana at `http://<ip>:3001`, login `admin/admin` | Built-in window + tray icon; optional web dashboard; `/metrics` compatible with the original Grafana dashboard |
 | Configuration | Edit `.env` and restart | Settings screen, applied immediately |
 | Storage | Prometheus TSDB in a Docker volume | SQLite file in your user folder |
 | Speed test | speedtest.net (`speedtest-cli`) | speed.cloudflare.com |
@@ -156,7 +232,7 @@ It contains `settings.json` and `netprobe.db` (SQLite). Delete the folder to res
 | Reports | Grafana screenshots | PDF report with findings, CSV export |
 | Latency detail | Averages | Percentiles, bufferbloat, uncached DNS |
 | Locating problems | No | Router vs ISP vs beyond |
-| Runs when | Always, on a server | While your computer is on |
+| Runs when | Always, on a server | While your computer is on, or 24/7 in always-on mode |
 | Platforms | Linux (anywhere Docker runs) | Windows, macOS, Linux |
 
 The original Python/Docker code is still in this repo, unchanged. Its instructions are in [docs/DOCKER.md](docs/DOCKER.md).
@@ -196,7 +272,10 @@ npm run dist:linux   # -> dist/Netprobe-linux.AppImage
 | `test/trace.test.js` | Traceroute per OS, partial output, missing tools |
 | `test/settings.test.js` | Defaults, first-run DNS detection, validation and clamping, corrupt files, persistence |
 | `test/renderer-lib.test.js` | Dashboard formatting, colour levels, chart data pivoting and gap handling, HTML escaping |
-| `scripts/smoke.js` | Launches the real Electron app and checks the dashboard loads without errors, a full probe is stored and rendered, and a PDF report renders |
+| `test/metrics.test.js` | Prometheus output: original metric names/labels (Grafana compatibility), new metrics, missing values, escaping |
+| `test/server.test.js` | Web server: pages and assets, JSON API, CSV/report, SSE, actions, bad input, read-only viewers, token auth and cookies |
+| `test/service.test.js` | Data-folder lock (stale locks, other processes), headless CLI start/stop, updater version logic and both update modes |
+| `scripts/smoke.js` | Launches the real Electron app and checks a first-run profile shows the welcome screen, the dashboard loads without errors, a full probe is stored and rendered, the web dashboard and `/metrics` are served over HTTP, and a PDF report renders |
 
 Coverage minimums (90% lines, 90% functions, 80% branches) are enforced by `npm run check`. `main.js`, `monitor.js`, `preload.js` and `app.js` are covered by the smoke test instead.
 
@@ -220,7 +299,18 @@ To release:
 git tag desktop-v1.3.0 && git push origin desktop-v1.3.0
 ```
 
-The Docker version keeps upstream's `v*` tags; desktop releases use `desktop-v*` so the two never collide.
+The Docker version keeps upstream's `v*` tags; desktop releases use `desktop-v*` so the two never collide. Each release includes `latest*.yml` and `.blockmap` files, which installed copies use to update themselves.
+
+### Code signing
+
+Builds are unsigned until certificates are added. The release workflow already passes these repository secrets to electron-builder, so adding them is all it takes:
+
+| Secret | For |
+|---|---|
+| `CSC_LINK`, `CSC_KEY_PASSWORD` | Base64 of a `.pfx` (Windows) or `.p12` (macOS Developer ID) certificate, and its password |
+| `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | macOS notarization (also add `"notarize": true` under `build.mac` in `package.json`) |
+
+Options: an [Apple Developer account](https://developer.apple.com/programs/) ($99/year) removes the macOS warning and allows in-place updates there; [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/) (~$10/month) or an OV certificate removes Windows SmartScreen warnings.
 
 ### Project layout
 
@@ -228,7 +318,11 @@ The Docker version keeps upstream's `v*` tags; desktop releases use `desktop-v*`
 desktop/
 ├── src/
 │   ├── main/
-│   │   ├── main.js        # Electron shell: window, tray, notifications, power events, IPC
+│   │   ├── main.js        # Electron shell: window, tray, notifications, power events, IPC, --headless
+│   │   ├── server.js      # web dashboard, JSON API, SSE, CSV/report, /metrics (plain Node)
+│   │   ├── metrics.js     # Prometheus exposition (original names + netprobe_*)
+│   │   ├── updater.js     # auto-update from GitHub Releases
+│   │   ├── lock.js        # one monitor per data folder
 │   │   ├── monitor.js     # engine: scheduling, state, incidents, sleep/network handling
 │   │   ├── probe.js       # ping (loss/latency/jitter/percentiles), router/ISP pings, DNS timing
 │   │   ├── icmp.js        # native Windows ICMP (IcmpSendEcho via koffi), ping.exe fallback
@@ -241,14 +335,15 @@ desktop/
 │   │   ├── score.js       # Internet Quality Score
 │   │   ├── db.js          # SQLite history (node:sqlite), downsampling, retention
 │   │   └── settings.js    # settings.json, defaults, validation, DNS auto-detect
+│   ├── cli.js             # headless mode (Node only)
 │   ├── preload.js         # safe IPC bridge to the dashboard
-│   └── renderer/          # dashboard (index.html, app.js), PDF report page (report.html), shared lib.js
+│   └── renderer/          # dashboard (index.html, app.js), report page, shared lib.js, web-bridge.js for browsers
 ├── assets/                # app and tray icons (generated by `npm run icons`)
 ├── scripts/               # smoke test, icon generator, screenshot helper
 └── test/                  # node:test unit tests
 ```
 
-There's no bundler. Storage uses the SQLite built into Electron's Node runtime. Runtime dependencies are [uPlot](https://github.com/leeoniya/uPlot) for charts and [koffi](https://koffi.dev) for the Windows ICMP call (only the Windows builds of koffi are packaged; if it can't load, Netprobe falls back to `ping.exe`).
+There's no bundler. Storage uses the SQLite built into Electron's Node runtime. Runtime dependencies are [uPlot](https://github.com/leeoniya/uPlot) for charts, [electron-updater](https://www.electron.build/auto-update) for updates, and [koffi](https://koffi.dev) for the Windows ICMP call (only the Windows builds of koffi are packaged; if it can't load, Netprobe falls back to `ping.exe`).
 
 ## Credits and license
 

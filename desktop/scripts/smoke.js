@@ -11,6 +11,9 @@ const path = require('node:path');
 const TIMEOUT_MS = 90_000;
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'netprobe-smoke-'));
 app.setPath('userData', dir);
+// A first-run profile with the web dashboard switched on.
+const PORT = 20000 + Math.floor(Math.random() * 20000);
+fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ onboarded: false, server: { enabled: true, port: PORT } }));
 
 const errors = [];
 const log = (...a) => console.log('[smoke]', ...a);
@@ -60,9 +63,10 @@ app.whenReady().then(async () => {
     connChip: !!document.querySelector('#conn-chip'),
     path: document.querySelectorAll('.path .node').length,
     exportDialog: !!document.querySelector('#export-form'),
+    welcome: document.querySelector('#welcome').open,
   })`);
   log('ui', JSON.stringify(ui));
-  if (!ui.lib || !ui.bridge || !ui.uplot || !ui.gauge || !ui.connChip || !ui.exportDialog || ui.path !== 4 || ui.charts !== 7) {
+  if (!ui.lib || !ui.bridge || !ui.uplot || !ui.gauge || !ui.connChip || !ui.exportDialog || !ui.welcome || ui.path !== 4 || ui.charts !== 7) {
     clearTimeout(timer);
     return finish(1, 'FAIL: dashboard did not initialise');
   }
@@ -88,6 +92,19 @@ app.whenReady().then(async () => {
   clearTimeout(timer);
   if (history.runs.length < 1) return finish(1, 'FAIL: probe was not stored');
   if (!rendered) return finish(1, 'FAIL: dashboard did not render the probe');
+  // The same dashboard, API and metrics over HTTP (always-on mode).
+  const base = `http://127.0.0.1:${PORT}`;
+  const web = {
+    page: (await fetch(`${base}/`)).status,
+    state: (await (await fetch(`${base}/api/state`)).json()).web,
+    metrics: /Health_Stats \d/.test(await (await fetch(`${base}/metrics`)).text()),
+  };
+  log('web', JSON.stringify(web));
+  if (web.page !== 200 || !web.state?.canWrite || !web.metrics) {
+    clearTimeout(timer);
+    return finish(1, 'FAIL: web dashboard / metrics not served');
+  }
+
   // Render the PDF report the same way the Export button does.
   const { Store } = require('../src/main/db');
   const { Settings } = require('../src/main/settings');

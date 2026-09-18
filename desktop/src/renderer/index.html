@@ -18,6 +18,7 @@
     <div class="status" id="status" aria-live="polite">Starting…</div>
     <span class="chip" id="conn-chip" hidden></span>
     <div class="actions">
+      <button id="btn-update" class="btn btn-update" hidden></button>
       <button id="btn-probe" class="btn">Probe now</button>
       <button id="btn-speed" class="btn">Speed test</button>
       <button id="btn-pause" class="btn">Pause</button>
@@ -27,6 +28,7 @@
   </header>
 
   <main>
+    <div class="readonly-note" id="readonly-note" hidden>Viewing Netprobe running on another computer. Changes are only possible there, or with its access token.</div>
     <div class="incident-strip" id="incident-strip" role="alert" hidden>
       <span class="pulse-dot" aria-hidden="true"></span>
       <div><strong id="incident-title"></strong> <span id="incident-detail"></span></div>
@@ -35,7 +37,7 @@
     <section class="hero">
       <div class="card score-card">
         <div class="card-label">Internet Quality Score</div>
-        <div class="gauge">
+        <div class="gauge" role="img" id="gauge" aria-label="Internet Quality Score not measured yet">
           <svg viewBox="0 0 200 120" aria-hidden="true">
             <path class="gauge-track" d="M20 110 A80 80 0 0 1 180 110"/>
             <path class="gauge-fill" id="gauge-fill" d="M20 110 A80 80 0 0 1 180 110"/>
@@ -111,12 +113,13 @@
         <option value="wifi">Wi-Fi only</option>
         <option value="vpn">VPN only</option>
       </select>
-      <div class="segmented" id="range" role="tablist">
-        <button data-range="3600000">1h</button>
-        <button data-range="21600000" class="active">6h</button>
-        <button data-range="86400000">24h</button>
-        <button data-range="604800000">7d</button>
-        <button data-range="2592000000">30d</button>
+      <span class="hint zoom-hint">Drag across a chart to zoom, double-click to reset</span>
+      <div class="segmented" id="range" role="tablist" aria-label="History range">
+        <button role="tab" aria-selected="false" data-range="3600000">1h</button>
+        <button role="tab" aria-selected="true" data-range="21600000" class="active">6h</button>
+        <button role="tab" aria-selected="false" data-range="86400000">24h</button>
+        <button role="tab" aria-selected="false" data-range="604800000">7d</button>
+        <button role="tab" aria-selected="false" data-range="2592000000">30d</button>
       </div>
       </div>
     </div>
@@ -132,7 +135,42 @@
     </section>
   </main>
 
-  <dialog id="settings" class="drawer">
+  <dialog id="welcome" class="modal welcome" aria-labelledby="welcome-title">
+    <form id="welcome-form" method="dialog">
+      <div class="welcome-head">
+        <img src="../../assets/icon.png" alt="" width="40" height="40">
+        <div>
+          <h2 id="welcome-title">Welcome to Netprobe</h2>
+          <p class="hint">Netprobe checks your internet every 30 seconds, tells you when it breaks and whose fault it is, and keeps the evidence.</p>
+        </div>
+      </div>
+      <section class="welcome-step">
+        <h3>Your connection</h3>
+        <div id="welcome-conn" class="welcome-conn">Detecting…</div>
+        <p class="hint" id="welcome-conn-tip"></p>
+      </section>
+      <section class="welcome-step">
+        <h3>Speed tests</h3>
+        <label class="check"><input type="checkbox" name="speedtestEnabled"> Run a speed test every ~15 minutes</label>
+        <p class="hint">Each test uses data (about 200 MB at 100 Mbps), and also measures lag under load.</p>
+        <div class="row">
+          <label>Your plan: download (Mbps)<input type="number" name="planDown" min="0" step="any" placeholder="optional"></label>
+          <label>Your plan: upload (Mbps)<input type="number" name="planUp" min="0" step="any" placeholder="optional"></label>
+        </div>
+      </section>
+      <section class="welcome-step">
+        <h3>Stay informed</h3>
+        <label class="check"><input type="checkbox" name="alertsNotify"> Notify me when my internet goes down or slows down</label>
+        <label class="check"><input type="checkbox" name="openAtLogin"> Start Netprobe when I log in, so it keeps a record</label>
+      </section>
+      <div class="modal-foot">
+        <span class="muted">You can change all of this later in Settings.</span>
+        <button type="submit" class="btn btn-primary">Start monitoring</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="settings" class="drawer" aria-label="Settings">
     <form id="settings-form" method="dialog">
       <div class="drawer-head">
         <h2>Settings</h2>
@@ -203,8 +241,23 @@
         </fieldset>
 
         <fieldset>
+          <legend>Web dashboard &amp; metrics</legend>
+          <label class="check"><input type="checkbox" name="serverEnabled"> Serve the dashboard over HTTP (and Prometheus /metrics)</label>
+          <div class="row">
+            <label>Port<input type="number" name="serverPort" min="1024" max="65535"></label>
+            <label class="check" style="align-self:end"><input type="checkbox" name="serverLan"> Allow other devices on my network</label>
+          </div>
+          <label>Access token for other devices <span class="hint">optional; without one they can view but not change anything</span>
+            <div class="token-row"><input type="text" name="serverToken" spellcheck="false" autocomplete="off"><button type="button" class="btn btn-small" id="token-new">Generate</button></div>
+          </label>
+          <div class="hint" id="server-hint"></div>
+        </fieldset>
+
+        <fieldset>
           <legend>App</legend>
           <label class="check"><input type="checkbox" name="openAtLogin"> Start with Windows / at login (runs in the tray)</label>
+          <label class="check"><input type="checkbox" name="autoUpdate"> Keep Netprobe up to date automatically</label>
+          <div class="hint" id="version-hint"></div>
           <label>Keep history for (days)<input type="number" name="retentionDays" min="1" max="365"></label>
           <button type="button" class="btn btn-danger btn-small" id="clear-history">Clear all history</button>
         </fieldset>
@@ -218,7 +271,7 @@
     </form>
   </dialog>
 
-  <dialog id="export" class="modal">
+  <dialog id="export" class="modal" aria-label="Export report">
     <form id="export-form" method="dialog">
       <h2>Export report</h2>
       <p class="hint">A PDF report is ready to send to your ISP: headline findings, uptime, outages with likely causes, charts, a day-by-day table and speed tests. CSV gives you the raw measurements.</p>

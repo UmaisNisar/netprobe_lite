@@ -69,6 +69,15 @@ function defaults({ detectDns = false } = {}) {
     planUp: 0,
     retentionDays: 30,
     openAtLogin: true,
+    autoUpdate: true, // check GitHub Releases for new versions
+    onboarded: false, // the welcome screen has been completed
+    // Built-in web dashboard + /metrics (always-on mode).
+    server: {
+      enabled: false,
+      port: 7979,
+      lan: false, // listen on all interfaces so other devices can connect
+      token: '', // optional access token for other devices
+    },
     alerts: {
       notify: true, // OS notification when an incident starts / ends
       degradedScore: 0.6, // a probe below this score counts as degraded
@@ -82,6 +91,8 @@ class Settings {
     this.file = path.join(dir, 'settings.json');
     try {
       const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+      // Installs from before the welcome screen existed don't need it.
+      if (saved.onboarded === undefined) saved.onboarded = true;
       this.value = validate(merge(defaults(), saved));
     } catch {
       // First run or unreadable file: start from defaults.
@@ -111,6 +122,7 @@ function merge(base, over) {
   out.weights = { ...base.weights, ...(over.weights || {}) };
   out.thresholds = { ...base.thresholds, ...(over.thresholds || {}) };
   out.alerts = { ...base.alerts, ...(over.alerts || {}) };
+  out.server = { ...base.server, ...(over.server || {}) };
   return out;
 }
 
@@ -168,7 +180,15 @@ function validate(s) {
   for (const k of Object.keys(d.thresholds)) s.thresholds[k] = clamp(s.thresholds[k], 0.1, 100000, d.thresholds[k]);
   s.speedtestEnabled = !!s.speedtestEnabled;
   s.openAtLogin = !!s.openAtLogin;
+  s.autoUpdate = s.autoUpdate !== false;
+  s.onboarded = !!s.onboarded;
   delete s.wifiWarning; // setting removed in 1.2 (no more banner)
+  s.server = {
+    enabled: !!s.server?.enabled,
+    port: Math.round(clamp(s.server?.port, 1024, 65535, d.server.port)),
+    lan: !!s.server?.lan,
+    token: String(s.server?.token ?? '').trim().slice(0, 128),
+  };
   s.alerts = {
     notify: !!s.alerts?.notify,
     degradedScore: clamp(s.alerts?.degradedScore, 0, 1, d.alerts.degradedScore),

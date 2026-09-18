@@ -1,5 +1,5 @@
 // Dev helper: starts the app normally, then saves PNGs of the dashboard.
-// Usage: electron scripts/screenshot.js <outPrefix> [delaySeconds] [--range=1h] [--click=#selector]
+// Usage: electron scripts/screenshot.js <outPrefix> [delaySeconds] [--range=1h] [--click=#selector] [--profile=name]
 // Writes <outPrefix>-top.png and <outPrefix>-charts.png. Uses its own
 // userData folder ("Netprobe Dev") so real history is untouched.
 
@@ -13,8 +13,10 @@ const range = (args.find((a) => a.startsWith('--range=')) || '').split('=')[1];
 // --click=<selector> clicks something (e.g. a dialog button) before capturing.
 const click = (args.find((a) => a.startsWith('--click=')) || '').slice('--click='.length);
 
-app.setName('Netprobe Dev');
-app.setPath('userData', path.join(app.getPath('appData'), 'Netprobe Dev'));
+// --profile=<name> uses a different data folder (e.g. a fresh one).
+const profile = (args.find((a) => a.startsWith('--profile=')) || '').slice('--profile='.length) || 'Netprobe Dev';
+app.setName(profile);
+app.setPath('userData', path.join(app.getPath('appData'), profile));
 require('../src/main/main');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

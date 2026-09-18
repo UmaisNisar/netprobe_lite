@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('netprobe', {
   togglePause: () => ipcRenderer.invoke('toggle-pause'),
   clearHistory: () => ipcRenderer.invoke('clear-history'),
   exportReport: (opts) => ipcRenderer.invoke('export-report', opts),
+  installUpdate: () => ipcRenderer.invoke('install-update'),
+  openUpdate: () => ipcRenderer.invoke('open-update'),
   onState: (fn) => {
     const listener = (_e, s) => fn(s);
     ipcRenderer.on('state', listener);
