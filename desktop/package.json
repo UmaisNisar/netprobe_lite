@@ -1,0 +1,92 @@
+{
+  "name": "netprobe-desktop",
+  "productName": "Netprobe",
+  "version": "1.0.0",
+  "description": "Monitor your home internet quality (latency, loss, jitter, DNS, bandwidth) from the system tray. Desktop port of netprobe_lite, no Docker needed.",
+  "main": "src/main/main.js",
+  "author": "Umais Nisar",
+  "homepage": "https://github.com/UmaisNisar/netprobe_lite",
+  "scripts": {
+    "start": "electron .",
+    "icons": "electron scripts/make-icons.js",
+    "test": "node --test \"test/*.test.js\"",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "dependencies": {
+    "uplot": "^1.6.32"
+  },
+  "devDependencies": {
+    "electron": "^44.4.2",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.netprobe.desktop",
+    "productName": "Netprobe",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "icon": "assets/icon.png",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "artifactName": "Netprobe-Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "Netprobe-Portable.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.utilities",
+      "artifactName": "Netprobe-mac-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Network",
+      "artifactName": "Netprobe-linux.${ext}"
+    },
+    "dmg": {
+      "title": "Netprobe ${version}"
+    },
+    "publish": null
+  }
+}

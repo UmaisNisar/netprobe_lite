@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Netprobe</title>
+  <link rel="stylesheet" href="../../node_modules/uplot/dist/uPlot.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="../../assets/icon.png" alt="" width="28" height="28">
+      <span>Netprobe</span>
+    </div>
+    <div class="status" id="status" aria-live="polite">Starting…</div>
+    <div class="actions">
+      <button id="btn-probe" class="btn">Probe now</button>
+      <button id="btn-speed" class="btn">Speed test</button>
+      <button id="btn-pause" class="btn">Pause</button>
+      <button id="btn-settings" class="btn btn-primary">Settings</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="card score-card">
+        <div class="card-label">Internet Quality Score</div>
+        <div class="gauge">
+          <svg viewBox="0 0 200 120" aria-hidden="true">
+            <path class="gauge-track" d="M20 110 A80 80 0 0 1 180 110"/>
+            <path class="gauge-fill" id="gauge-fill" d="M20 110 A80 80 0 0 1 180 110"/>
+          </svg>
+          <div class="gauge-value"><span id="score">–</span><small>%</small></div>
+        </div>
+        <div class="score-caption" id="score-caption">Waiting for the first probe</div>
+      </div>
+
+      <div class="stats">
+        <div class="card stat"><div class="card-label">Latency</div><div class="stat-value" id="s-latency">–</div><div class="stat-sub">avg to sites</div></div>
+        <div class="card stat"><div class="card-label">Packet loss</div><div class="stat-value" id="s-loss">–</div><div class="stat-sub">avg to sites</div></div>
+        <div class="card stat"><div class="card-label">Jitter</div><div class="stat-value" id="s-jitter">–</div><div class="stat-sub">avg to sites</div></div>
+        <div class="card stat"><div class="card-label">DNS (my server)</div><div class="stat-value" id="s-dns">–</div><div class="stat-sub" id="s-dns-sub">response time</div></div>
+        <div class="card stat"><div class="card-label">Download</div><div class="stat-value" id="s-down">–</div><div class="stat-sub" id="s-speed-sub">speed test off</div></div>
+        <div class="card stat"><div class="card-label">Upload</div><div class="stat-value" id="s-up">–</div><div class="stat-sub" id="s-speed-sub2">&nbsp;</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h2>Latest probe</h2>
+        <span class="muted" id="probe-time"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="targets">
+          <thead><tr><th>Site</th><th>Latency</th><th>Loss</th><th>Jitter</th></tr></thead>
+          <tbody id="site-rows"><tr><td colspan="4" class="muted">No data yet</td></tr></tbody>
+        </table>
+        <table class="targets">
+          <thead><tr><th>DNS server</th><th>IP</th><th>Response</th></tr></thead>
+          <tbody id="dns-rows"><tr><td colspan="3" class="muted">No data yet</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="section-head history-head">
+      <h2>History</h2>
+      <div class="segmented" id="range" role="tablist">
+        <button data-range="3600000">1h</button>
+        <button data-range="21600000" class="active">6h</button>
+        <button data-range="86400000">24h</button>
+        <button data-range="604800000">7d</button>
+        <button data-range="2592000000">30d</button>
+      </div>
+    </div>
+
+    <section class="charts">
+      <div class="card chart-card"><h3>Internet Quality Score</h3><div class="chart" id="c-score"></div></div>
+      <div class="card chart-card"><h3>Latency (ms)</h3><div class="chart" id="c-latency"></div></div>
+      <div class="card chart-card"><h3>Packet loss (%)</h3><div class="chart" id="c-loss"></div></div>
+      <div class="card chart-card"><h3>Jitter (ms)</h3><div class="chart" id="c-jitter"></div></div>
+      <div class="card chart-card"><h3>DNS response time (ms)</h3><div class="chart" id="c-dns"></div></div>
+      <div class="card chart-card"><h3>Bandwidth (Mbps)</h3><div class="chart" id="c-speed"></div></div>
+    </section>
+  </main>
+
+  <dialog id="settings" class="drawer">
+    <form id="settings-form" method="dialog">
+      <div class="drawer-head">
+        <h2>Settings</h2>
+        <button type="button" class="btn btn-ghost" id="settings-close" aria-label="Close">✕</button>
+      </div>
+
+      <div class="drawer-body">
+        <fieldset>
+          <legend>Probe</legend>
+          <label>Sites to ping <span class="hint">one per line, domain only</span>
+            <textarea name="sites" rows="5" spellcheck="false"></textarea>
+          </label>
+          <div class="row">
+            <label>Interval (seconds)<input type="number" name="probeInterval" min="15" max="3600"></label>
+            <label>Pings per site<input type="number" name="pingCount" min="5" max="200"></label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>DNS</legend>
+          <label>Domain to resolve<input type="text" name="dnsTestSite" spellcheck="false"></label>
+          <div class="hint">Mark the server your network actually uses as “mine”. Its response time feeds the score.</div>
+          <div id="dns-list" class="dns-list"></div>
+          <button type="button" class="btn btn-small" id="dns-add">Add server</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Speed test</legend>
+          <label class="check"><input type="checkbox" name="speedtestEnabled"> Run speed tests automatically</label>
+          <div class="hint">Uses speed.cloudflare.com. Each test transfers up to ~1 GB on fast lines (about 200 MB at 100 Mbps). Leave off on metered connections.</div>
+          <label>Interval (minutes)<input type="number" name="speedtestIntervalMin" min="5" max="1440"></label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Score</legend>
+          <div class="hint">Weights should add up to 1.0. Thresholds are the values at which a metric counts as fully bad.</div>
+          <div class="grid4">
+            <span></span><span class="hint">Weight</span><span class="hint">Threshold</span><span></span>
+            <span>Loss (%)</span><input type="number" step="0.01" name="w.loss"><input type="number" step="any" name="t.loss"><span></span>
+            <span>Latency (ms)</span><input type="number" step="0.01" name="w.latency"><input type="number" step="any" name="t.latency"><span></span>
+            <span>Jitter (ms)</span><input type="number" step="0.01" name="w.jitter"><input type="number" step="any" name="t.jitter"><span></span>
+            <span>DNS (ms)</span><input type="number" step="0.01" name="w.dnsLatency"><input type="number" step="any" name="t.dnsLatency"><span></span>
+          </div>
+          <div class="hint" id="weight-sum"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>App</legend>
+          <label class="check"><input type="checkbox" name="openAtLogin"> Start with Windows / at login (runs in the tray)</label>
+          <label>Keep history for (days)<input type="number" name="retentionDays" min="1" max="365"></label>
+          <button type="button" class="btn btn-danger btn-small" id="clear-history">Clear all history</button>
+        </fieldset>
+      </div>
+
+      <div class="drawer-foot">
+        <span class="muted" id="save-msg"></span>
+        <button type="button" class="btn" id="settings-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="../../node_modules/uplot/dist/uPlot.iife.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
