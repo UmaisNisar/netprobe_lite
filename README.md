@@ -44,6 +44,7 @@ The builds are not code-signed (signing certificates cost money), so your OS wil
 - **History charts** for 1h, 6h, 24h, 7d or 30d, with synced crosshairs across all charts. Gaps show when the PC was off rather than drawing misleading lines.
 - **Settings in the app:** sites, DNS servers, probe interval, score weights, thresholds, speed test and retention. No `.env` editing.
 - **Detects your home DNS server** automatically on first run.
+- **Warns you when you're on Wi-Fi.** A banner and a top-bar chip show whether traffic goes over Wi-Fi or a cable, because Wi-Fi results include your wireless signal as well as your ISP.
 - **Local only.** Data stays in a SQLite file on your machine. No accounts, no telemetry, no open ports.
 - **No admin rights needed.** It uses your OS's built-in `ping`.
 
@@ -74,7 +75,7 @@ score = 1 − 0.60 × min(loss / 5%, 1)
 
 ## Getting accurate results
 
-- **Use a wired connection if you can.** On Wi-Fi you're measuring your Wi-Fi *plus* your ISP. That's still useful, but a spike might be the microwave rather than your provider. For the cleanest ISP data, run it on a PC connected to your router by Ethernet.
+- **Use a wired connection if you can.** On Wi-Fi you're measuring your Wi-Fi *plus* your ISP. That's still useful, but a spike might be the microwave rather than your provider. For the cleanest ISP data, run it on a PC connected to your router by Ethernet. Netprobe detects the connection that carries your internet traffic (on Windows, macOS and Linux) and shows a warning while it's Wi-Fi. You can turn the warning off in Settings.
 - **Leave it running.** Netprobe only records while your computer is on. For 24/7 coverage, run it on an always-on machine, or use the [original Docker version](docs/DOCKER.md) on a home server.
 - **Some sites ignore ping.** amazon.com and netflix.com, for example, block ICMP. A site that answers no pings while others do is marked **no reply** and left out of the score. If *every* site goes silent, that's an outage and counts as 100% loss.
 - **Speed tests use data.** A test uses about 200 MB on a 100 Mbps line and at most ~1 GB on gigabit+. At the default ~15-minute interval that adds up, so leave it off on metered or mobile connections, or raise the interval.
@@ -93,6 +94,7 @@ Click **Settings** in the top-right corner of the dashboard.
 | Speed test | Off | Interval in minutes (default ~15) |
 | Score weights / thresholds | 0.6 / 0.15 / 0.2 / 0.05 and 5% / 100 / 30 / 100 ms | Weights should add up to 1.0 |
 | Start at login | On | Starts hidden in the tray |
+| Warn on Wi-Fi | On | Shows the Wi-Fi banner; "Don't warn again" turns this off |
 | Keep history for | 30 days | Older data is deleted automatically |
 
 The tray menu also has **Probe now**, **Run speed test now**, **Pause monitoring** and **Quit**.
@@ -152,6 +154,7 @@ npm run dist:linux   # -> dist/Netprobe-linux.AppImage
 | `test/speedtest.test.js` | Throughput math, 500 MB cap, request count, HTTP 429/403/500 and network failures (fake `fetch`) |
 | `test/score.test.js` | Quality score formula, thresholds, non-replying sites, outages, home-DNS selection |
 | `test/db.test.js` | SQLite writes, time-window queries, bucket averaging, retention pruning, atomic saves, persistence |
+| `test/network.test.js` | Wi-Fi vs wired detection for Windows, macOS and Linux, including VPNs and failures |
 | `test/settings.test.js` | Defaults, first-run DNS detection, validation and clamping, corrupt files, persistence |
 | `test/renderer-lib.test.js` | Dashboard formatting, colour levels, chart data pivoting and gap handling, HTML escaping |
 | `scripts/smoke.js` | Launches the real Electron app and checks the dashboard loads without errors and a full probe is stored and rendered |
@@ -189,6 +192,7 @@ desktop/
 │   │   ├── main.js        # app lifecycle, tray, scheduling, IPC
 │   │   ├── probe.js       # ping (loss/latency/jitter) + DNS timing
 │   │   ├── speedtest.js   # Cloudflare bandwidth test
+│   │   ├── network.js     # Wi-Fi vs wired detection
 │   │   ├── score.js       # Internet Quality Score
 │   │   ├── db.js          # SQLite history (node:sqlite), downsampling, retention
 │   │   └── settings.js    # settings.json, defaults, validation, DNS auto-detect

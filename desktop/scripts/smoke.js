@@ -57,9 +57,10 @@ app.whenReady().then(async () => {
     uplot: typeof window.uPlot === 'function',
     gauge: !!document.querySelector('#gauge-fill'),
     charts: document.querySelectorAll('.chart').length,
+    wifiBanner: !!document.querySelector('#wifi-banner'),
   })`);
   log('ui', JSON.stringify(ui));
-  if (!ui.lib || !ui.bridge || !ui.uplot || !ui.gauge || ui.charts !== 6) {
+  if (!ui.lib || !ui.bridge || !ui.uplot || !ui.gauge || !ui.wifiBanner || ui.charts !== 6) {
     clearTimeout(timer);
     return finish(1, 'FAIL: dashboard did not initialise');
   }
@@ -78,6 +79,7 @@ app.whenReady().then(async () => {
   }
   const s = state.latest.summary;
   log('probe', JSON.stringify({ score: s.score, latency: s.latency, loss: s.loss, dns: state.latest.result.dns.length }));
+  log('connection', JSON.stringify(state.connection));
 
   const history = await js('window.netprobe.getHistory(3600000)');
   const rendered = await js(`!!document.querySelector('#c-score .uplot') && document.querySelector('#score').textContent !== '–'`);

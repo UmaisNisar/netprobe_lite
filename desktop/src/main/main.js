@@ -8,6 +8,7 @@ const speedtest = require('./speedtest');
 const { summarise } = require('./score');
 const { Settings } = require('./settings');
 const { Store } = require('./db');
+const { detectConnection } = require('./network');
 
 const ASSETS = path.join(__dirname, '..', '..', 'assets');
 let startHidden = process.argv.includes('--hidden');
@@ -33,6 +34,7 @@ const state = {
   paused: false,
   nextProbeAt: null,
   nextSpeedtestAt: null,
+  connection: { type: 'unknown', name: null }, // wifi | wired | unknown
 };
 
 let probeTimer = null;
@@ -111,6 +113,14 @@ function scheduleSpeedtest(delayMs) {
   }, delay);
 }
 
+async function refreshConnection() {
+  const next = await detectConnection();
+  if (next.type === state.connection.type && next.name === state.connection.name) return;
+  state.connection = next;
+  updateTray();
+  broadcast();
+}
+
 function prune() {
   try {
     store.prune(settings.get().retentionDays);
@@ -187,6 +197,7 @@ function updateTray() {
   const sum = state.latest?.summary;
   tray.setImage(trayIcon(state.paused ? 'idle' : scoreLevel(sum?.score)));
   const lines = ['Netprobe'];
+  if (state.connection.type === 'wifi') lines.push('On Wi-Fi: results include Wi-Fi issues');
   if (state.paused) lines.push('Paused');
   else if (sum) {
     lines.push(`Score ${Math.round(sum.score * 100)}%`);
@@ -285,6 +296,8 @@ app.whenReady().then(() => {
 
   prune();
   setInterval(prune, 3600_000);
+  refreshConnection();
+  setInterval(refreshConnection, 120_000);
   scheduleProbe(1000);
   scheduleSpeedtest();
 });

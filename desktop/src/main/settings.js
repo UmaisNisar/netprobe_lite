@@ -63,6 +63,7 @@ function defaults({ detectDns = false } = {}) {
     speedtestInterval: 937, // seconds; a prime to avoid colliding with probes
     retentionDays: 30,
     openAtLogin: true,
+    wifiWarning: true, // show the "you're on Wi-Fi" banner
   };
 }
 
@@ -130,6 +131,7 @@ function validate(s) {
   for (const k of Object.keys(d.thresholds)) s.thresholds[k] = clamp(s.thresholds[k], 0.1, 100000, d.thresholds[k]);
   s.speedtestEnabled = !!s.speedtestEnabled;
   s.openAtLogin = !!s.openAtLogin;
+  s.wifiWarning = !!s.wifiWarning;
   return s;
 }
 

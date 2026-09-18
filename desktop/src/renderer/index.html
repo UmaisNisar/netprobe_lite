@@ -16,6 +16,7 @@
       <span>Netprobe</span>
     </div>
     <div class="status" id="status" aria-live="polite">Starting…</div>
+    <span class="chip" id="conn-chip" hidden></span>
     <div class="actions">
       <button id="btn-probe" class="btn">Probe now</button>
       <button id="btn-speed" class="btn">Speed test</button>
@@ -25,6 +26,18 @@
   </header>
 
   <main>
+    <div class="banner" id="wifi-banner" role="status" hidden>
+      <span class="banner-icon" aria-hidden="true">!</span>
+      <div class="banner-text">
+        <strong>You're on Wi-Fi<span id="wifi-name"></span>.</strong>
+        Results include your wireless signal and interference, not just your ISP. For ISP-only measurements, connect this computer to your router with an Ethernet cable.
+      </div>
+      <div class="banner-actions">
+        <button class="btn btn-small" id="wifi-dismiss">Dismiss</button>
+        <button class="btn btn-ghost btn-small" id="wifi-never">Don't warn again</button>
+      </div>
+    </div>
+
     <section class="hero">
       <div class="card score-card">
         <div class="card-label">Internet Quality Score</div>
@@ -136,6 +149,7 @@
         <fieldset>
           <legend>App</legend>
           <label class="check"><input type="checkbox" name="openAtLogin"> Start with Windows / at login (runs in the tray)</label>
+          <label class="check"><input type="checkbox" name="wifiWarning"> Warn when connected over Wi-Fi</label>
           <label>Keep history for (days)<input type="number" name="retentionDays" min="1" max="365"></label>
           <button type="button" class="btn btn-danger btn-small" id="clear-history">Clear all history</button>
         </fieldset>

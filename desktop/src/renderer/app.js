@@ -9,6 +9,7 @@ let rangeMs = 6 * 3600_000;
 let charts = [];
 let lastProbeTs = null;
 let lastSpeedTs = null;
+let wifiDismissedFor = null; // connection name the banner was dismissed for
 
 // ------------------------------------------------------------ formatting
 
@@ -29,6 +30,19 @@ function setValue(id, value, unit, cls = '') {
   const el = $(id);
   el.className = `stat-value ${cls}`;
   el.innerHTML = value === '–' ? '–' : `${value}<small>${unit}</small>`;
+}
+
+function renderConnection() {
+  const conn = state.connection || { type: 'unknown' };
+  const chip = $('#conn-chip');
+  chip.hidden = conn.type === 'unknown';
+  chip.className = `chip ${conn.type}`;
+  chip.textContent = conn.type === 'wifi' ? 'Wi-Fi' : 'Wired';
+  chip.title = conn.name ? `Internet traffic goes through: ${conn.name}` : '';
+
+  const show = conn.type === 'wifi' && state.settings.wifiWarning && wifiDismissedFor !== conn.name;
+  $('#wifi-banner').hidden = !show;
+  $('#wifi-name').textContent = conn.name && !/^wi-?fi$/i.test(conn.name) ? ` (${conn.name})` : '';
 }
 
 function renderStatus() {
@@ -115,6 +129,8 @@ function renderState() {
     });
     $('#dns-rows').innerHTML = dnsRows.join('');
   }
+
+  renderConnection();
 
   // Buttons
   $('#btn-probe').disabled = state.probing || state.speedtesting || state.paused;
@@ -255,6 +271,11 @@ $('#range').addEventListener('click', (e) => {
 $('#btn-probe').addEventListener('click', () => api.probeNow());
 $('#btn-speed').addEventListener('click', () => api.speedtestNow());
 $('#btn-pause').addEventListener('click', () => api.togglePause());
+$('#wifi-dismiss').addEventListener('click', () => {
+  wifiDismissedFor = state.connection?.name ?? null;
+  renderConnection();
+});
+$('#wifi-never').addEventListener('click', () => api.saveSettings({ ...state.settings, wifiWarning: false }));
 
 // ------------------------------------------------------------ settings
 
@@ -297,6 +318,7 @@ function openSettings() {
   for (const k of Object.keys(s.weights)) form[`w.${k}`].value = s.weights[k];
   for (const k of Object.keys(s.thresholds)) form[`t.${k}`].value = s.thresholds[k];
   form.openAtLogin.checked = s.openAtLogin;
+  form.wifiWarning.checked = s.wifiWarning;
   form.retentionDays.value = s.retentionDays;
   $('#save-msg').textContent = '';
   updateWeightSum();
@@ -326,6 +348,7 @@ form.addEventListener('submit', async (e) => {
     weights: { loss: num('w.loss'), latency: num('w.latency'), jitter: num('w.jitter'), dnsLatency: num('w.dnsLatency') },
     thresholds: { loss: num('t.loss'), latency: num('t.latency'), jitter: num('t.jitter'), dnsLatency: num('t.dnsLatency') },
     openAtLogin: form.openAtLogin.checked,
+    wifiWarning: form.wifiWarning.checked,
     retentionDays: num('retentionDays'),
   };
   try {
