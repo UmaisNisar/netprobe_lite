@@ -224,3 +224,13 @@ test('auto-update can be switched off; the old Wi-Fi banner setting is dropped',
   assert.strictEqual(validate({ ...defaults(), autoUpdate: false }).autoUpdate, false);
   assert.ok(!('wifiWarning' in validate({ ...defaults(), wifiWarning: true })));
 });
+
+test('set keeps fields the update does not mention (regression: welcome reappeared)', (t) => {
+  const s = new Settings(tempDir(t));
+  s.set({ onboarded: true, planDown: 500, server: { enabled: true, port: 8000 } });
+  const saved = s.set({ probeInterval: 60, server: { lan: true } });
+  assert.strictEqual(saved.onboarded, true);
+  assert.strictEqual(saved.planDown, 500);
+  assert.deepStrictEqual({ ...saved.server, token: undefined }, { enabled: true, port: 8000, lan: true, token: undefined });
+  assert.strictEqual(saved.probeInterval, 60);
+});

@@ -105,8 +105,10 @@ class Settings {
     return structuredClone(this.value);
   }
 
+  // Applies a (possibly partial) update on top of the current settings, so
+  // fields a caller doesn't know about (e.g. `onboarded`) are kept.
   set(next) {
-    this.value = validate(merge(defaults(), next));
+    this.value = validate(merge(this.get(), next));
     this.write();
     return this.get();
   }
