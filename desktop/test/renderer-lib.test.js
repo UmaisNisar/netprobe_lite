@@ -70,3 +70,27 @@ test('esc neutralises HTML in user-provided names', () => {
   assert.strictEqual(esc('<img src=x onerror="a()">'), '&lt;img src=x onerror=&quot;a()&quot;&gt;');
   assert.strictEqual(esc("a & b's"), 'a &amp; b&#39;s');
 });
+
+const { LOCATIONS, formatDuration, segmentText, uptimeText } = require('../src/renderer/lib');
+
+test('formatDuration covers seconds to days', () => {
+  assert.strictEqual(formatDuration(0), '1s');
+  assert.strictEqual(formatDuration(45_000), '45s');
+  assert.strictEqual(formatDuration(120_000), '2 min');
+  assert.strictEqual(formatDuration(200_000), '3 min 20s');
+  assert.strictEqual(formatDuration(3_600_000), '1 h');
+  assert.strictEqual(formatDuration(5_400_000), '1 h 30 min');
+  assert.strictEqual(formatDuration(3 * 86_400_000 + 3_600_000), '3 d 1 h');
+});
+
+test('segment and uptime texts', () => {
+  assert.strictEqual(segmentText('ok'), 'Healthy');
+  assert.strictEqual(segmentText('silent'), "Doesn't answer ping");
+  assert.strictEqual(segmentText('nonsense'), 'Not visible');
+  assert.strictEqual(uptimeText(null), '–');
+  assert.strictEqual(uptimeText({ uptime: null }), '–');
+  assert.strictEqual(uptimeText({ uptime: 1 }), '100%');
+  assert.strictEqual(uptimeText({ uptime: 0.99912 }), '99.91%');
+  assert.strictEqual(uptimeText({ uptime: 0.9 }), '90.0%');
+  assert.ok(LOCATIONS.home && LOCATIONS.isp);
+});

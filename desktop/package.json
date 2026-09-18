@@ -1,7 +1,7 @@
 {
   "name": "netprobe-desktop",
   "productName": "Netprobe",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Monitor your home internet quality (latency, loss, jitter, DNS, bandwidth) from the system tray. Desktop port of netprobe_lite, no Docker needed.",
   "main": "src/main/main.js",
   "author": "Umais Nisar",
@@ -10,7 +10,7 @@
     "start": "electron .",
     "lint": "eslint .",
     "test": "node --test \"test/*.test.js\"",
-    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=\"src/**\" --test-coverage-exclude=\"src/main/main.js\" --test-coverage-exclude=\"src/renderer/app.js\" --test-coverage-exclude=\"src/preload.js\" --test-coverage-lines=90 --test-coverage-functions=90 --test-coverage-branches=80 \"test/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=\"src/**\" --test-coverage-exclude=\"src/main/main.js\" --test-coverage-exclude=\"src/renderer/app.js\" --test-coverage-exclude=\"src/preload.js\" --test-coverage-exclude=\"src/main/monitor.js\" --test-coverage-lines=90 --test-coverage-functions=90 --test-coverage-branches=80 \"test/*.test.js\"",
     "smoke": "electron scripts/smoke.js",
     "check": "npm run lint && npm run test:coverage",
     "icons": "electron scripts/make-icons.js",

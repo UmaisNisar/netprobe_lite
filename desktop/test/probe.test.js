@@ -241,3 +241,34 @@ test('collect probes every site and DNS server', async () => {
     srv.close();
   }
 });
+
+test('collect pings the router and ISP hop with a smaller count', async () => {
+  const calls = [];
+  const spawn = fakeSpawn(() => winReply(3), calls);
+  const result = await withDeps({ platform: 'win32', spawn }, () =>
+    collect(
+      { sites: ['a.com'], pingCount: 50, dnsTestSite: 'x', dnsServers: [] },
+      { path: { gateway: '192.168.1.1', isp: null }, dnsServers: [] }
+    )
+  );
+  assert.deepStrictEqual(result.path, { gateway: { ip: '192.168.1.1', latency: 3, loss: 75, jitter: 0 }, isp: null });
+  const gwCalls = calls.filter((c) => c.args.includes('192.168.1.1'));
+  // PATH_PINGS (20) over 5 streams, each answering 1 of its 4 pings.
+  assert.strictEqual(gwCalls.length, 5);
+  assert.ok(gwCalls.every((c) => c.args[1] === String(probe.PATH_PINGS / 5)));
+});
+
+test('collect uses the dnsServers override', async () => {
+  const srv = await dnsServer();
+  try {
+    const result = await withDeps({ spawn: fakeSpawn(() => '') }, () =>
+      collect(
+        { sites: [], pingCount: 5, dnsTestSite: 'example.com', dnsServers: [{ name: 'Configured', ip: 'bad' }] },
+        { dnsServers: [{ name: 'Detected', ip: srv.address }] }
+      )
+    );
+    assert.deepStrictEqual(result.dns.map((d) => [d.name, d.ok]), [['Detected', true]]);
+  } finally {
+    srv.close();
+  }
+});

@@ -67,5 +67,44 @@
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   }
 
-  return { fmt, mbps, fmtMbps, timeAgo, level, scoreCaption, pivot, esc };
+  // Where a problem is, as shown to people (keys come from diagnose.js).
+  const LOCATIONS = {
+    home: 'Your home network (Wi-Fi or router)',
+    isp: 'Your ISP',
+    upstream: 'Your ISP or beyond',
+    internet: "Beyond your ISP's first router",
+    vpn: 'The VPN path',
+  };
+
+  function formatDuration(ms) {
+    const s = Math.max(1, Math.round(ms / 1000));
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return s % 60 ? `${m} min ${s % 60}s` : `${m} min`;
+    const h = Math.floor(m / 60);
+    if (h < 48) return m % 60 ? `${h} h ${m % 60} min` : `${h} h`;
+    return `${Math.floor(h / 24)} d ${h % 24} h`;
+  }
+
+  // Status of one segment of the path (router, ISP) for the path view.
+  function segmentText(segment) {
+    return {
+      ok: 'Healthy',
+      bad: 'Problems',
+      down: 'Not reachable',
+      silent: "Doesn't answer ping",
+      unknown: 'Not visible',
+    }[segment] ?? 'Not visible';
+  }
+
+  function uptimeText(u) {
+    if (!u || u.uptime == null) return '–';
+    const pct = u.uptime * 100;
+    return pct >= 99.995 ? '100%' : `${pct.toFixed(pct >= 99 ? 2 : 1)}%`;
+  }
+
+  return {
+    fmt, mbps, fmtMbps, timeAgo, level, scoreCaption, pivot, esc,
+    LOCATIONS, formatDuration, segmentText, uptimeText,
+  };
 });

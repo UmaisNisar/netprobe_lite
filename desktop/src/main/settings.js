@@ -52,8 +52,9 @@ function defaults({ detectDns = false } = {}) {
       { name: 'Google DNS', ip: '8.8.8.8' },
       { name: 'Quad9 DNS', ip: '9.9.9.9' },
       { name: 'Cloudflare DNS', ip: '1.1.1.1' },
-      // Defaults to whatever resolver this PC is configured to use.
-      { name: 'My DNS Server', ip: detectDns ? deps.systemDns() : '8.8.8.8', home: true },
+      // "auto" follows the resolver of whatever network you're on; the ip is
+      // the last one seen (and the fallback if detection fails).
+      { name: 'My DNS Server', ip: detectDns ? deps.systemDns() : '8.8.8.8', home: true, auto: true },
     ],
     probeInterval: 30, // seconds
     pingCount: 50, // pings per site per probe
@@ -64,6 +65,11 @@ function defaults({ detectDns = false } = {}) {
     retentionDays: 30,
     openAtLogin: true,
     wifiWarning: true, // show the "you're on Wi-Fi" banner
+    alerts: {
+      notify: true, // OS notification when an incident starts / ends
+      degradedScore: 0.6, // a probe below this score counts as degraded
+      degradedLoss: 2, // ...or with at least this % packet loss
+    },
   };
 }
 
@@ -100,6 +106,7 @@ function merge(base, over) {
   const out = { ...base, ...over };
   out.weights = { ...base.weights, ...(over.weights || {}) };
   out.thresholds = { ...base.thresholds, ...(over.thresholds || {}) };
+  out.alerts = { ...base.alerts, ...(over.alerts || {}) };
   return out;
 }
 
@@ -114,7 +121,13 @@ function validate(s) {
   if (!s.sites.length) s.sites = d.sites;
   s.dnsTestSite = String(s.dnsTestSite || '').trim() || d.dnsTestSite;
   s.dnsServers = (s.dnsServers || [])
-    .map((x) => ({ name: String(x.name || x.ip || '').trim(), ip: String(x.ip || '').trim(), home: !!x.home }))
+    .map((x) => ({
+      name: String(x.name || x.ip || '').trim(),
+      ip: String(x.ip || '').trim(),
+      home: !!x.home,
+      // Home servers saved before 1.1 follow the network automatically.
+      auto: !!x.home && (x.auto ?? true),
+    }))
     .filter((x) => x.ip);
   if (!s.dnsServers.length) s.dnsServers = defaults({ detectDns: true }).dnsServers;
   if (!s.dnsServers.some((x) => x.home)) s.dnsServers[s.dnsServers.length - 1].home = true;
@@ -132,6 +145,11 @@ function validate(s) {
   s.speedtestEnabled = !!s.speedtestEnabled;
   s.openAtLogin = !!s.openAtLogin;
   s.wifiWarning = !!s.wifiWarning;
+  s.alerts = {
+    notify: !!s.alerts?.notify,
+    degradedScore: clamp(s.alerts?.degradedScore, 0, 1, d.alerts.degradedScore),
+    degradedLoss: clamp(s.alerts?.degradedLoss, 0.1, 100, d.alerts.degradedLoss),
+  };
   return s;
 }
 

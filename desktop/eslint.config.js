@@ -8,7 +8,7 @@ module.exports = [
     files: ['**/*.js'],
     languageOptions: { ecmaVersion: 2024, sourceType: 'commonjs', globals: { ...globals.node } },
     rules: {
-      'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrors: 'none' }],
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none' }],
       'no-empty': ['error', { allowEmptyCatch: true }],
     },
   },

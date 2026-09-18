@@ -26,15 +26,17 @@
   </header>
 
   <main>
-    <div class="banner" id="wifi-banner" role="status" hidden>
+    <div class="incident-strip" id="incident-strip" role="alert" hidden>
+      <span class="pulse-dot" aria-hidden="true"></span>
+      <div><strong id="incident-title"></strong> <span id="incident-detail"></span></div>
+    </div>
+
+    <div class="banner" id="net-banner" role="status" hidden>
       <span class="banner-icon" aria-hidden="true">!</span>
-      <div class="banner-text">
-        <strong>You're on Wi-Fi<span id="wifi-name"></span>.</strong>
-        Results include your wireless signal and interference, not just your ISP. For ISP-only measurements, connect this computer to your router with an Ethernet cable.
-      </div>
+      <div class="banner-text" id="net-banner-text"></div>
       <div class="banner-actions">
-        <button class="btn btn-small" id="wifi-dismiss">Dismiss</button>
-        <button class="btn btn-ghost btn-small" id="wifi-never">Don't warn again</button>
+        <button class="btn btn-small" id="net-dismiss">Dismiss</button>
+        <button class="btn btn-ghost btn-small" id="net-never">Don't warn again</button>
       </div>
     </div>
 
@@ -61,6 +63,36 @@
       </div>
     </section>
 
+    <section class="card path-card">
+      <div class="section-head">
+        <h2>Where's the problem?</h2>
+        <span class="verdict" id="verdict">Waiting for the first probe</span>
+      </div>
+      <ol class="path" id="path">
+        <li class="node" data-seg="computer"><span class="node-dot"></span><strong>This computer</strong><span class="node-sub" id="p-computer">–</span></li>
+        <li class="node" data-seg="gateway"><span class="node-dot"></span><strong>Your router</strong><span class="node-sub" id="p-gateway">–</span></li>
+        <li class="node" data-seg="isp"><span class="node-dot"></span><strong>Your ISP</strong><span class="node-sub" id="p-isp">–</span></li>
+        <li class="node" data-seg="internet"><span class="node-dot"></span><strong>Internet</strong><span class="node-sub" id="p-internet">–</span></li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h2>Incidents</h2>
+        <div class="uptime">
+          <span>Uptime 24h <strong id="up-day">–</strong></span>
+          <span>7 days <strong id="up-week">–</strong></span>
+          <span>Incidents 7d <strong id="inc-week">–</strong></span>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table class="targets incidents">
+          <thead><tr><th>Started</th><th>Duration</th><th>Type</th><th>Likely cause</th><th>Worst loss</th><th>Connection</th><th></th></tr></thead>
+          <tbody id="incident-rows"><tr><td colspan="7" class="muted">No incidents in the last 30 days.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="card">
       <div class="section-head">
         <h2>Latest probe</h2>
@@ -80,6 +112,13 @@
 
     <div class="section-head history-head">
       <h2>History</h2>
+      <div class="history-controls">
+      <select id="conn-filter" aria-label="Connection filter">
+        <option value="">All connections</option>
+        <option value="wired">Wired only</option>
+        <option value="wifi">Wi-Fi only</option>
+        <option value="vpn">VPN only</option>
+      </select>
       <div class="segmented" id="range" role="tablist">
         <button data-range="3600000">1h</button>
         <button data-range="21600000" class="active">6h</button>
@@ -87,11 +126,13 @@
         <button data-range="604800000">7d</button>
         <button data-range="2592000000">30d</button>
       </div>
+      </div>
     </div>
 
     <section class="charts">
       <div class="card chart-card"><h3>Internet Quality Score</h3><div class="chart" id="c-score"></div></div>
       <div class="card chart-card"><h3>Latency (ms)</h3><div class="chart" id="c-latency"></div></div>
+      <div class="card chart-card"><h3>Path latency (ms): router vs ISP vs sites</h3><div class="chart" id="c-path"></div></div>
       <div class="card chart-card"><h3>Packet loss (%)</h3><div class="chart" id="c-loss"></div></div>
       <div class="card chart-card"><h3>Jitter (ms)</h3><div class="chart" id="c-jitter"></div></div>
       <div class="card chart-card"><h3>DNS response time (ms)</h3><div class="chart" id="c-dns"></div></div>
@@ -121,7 +162,7 @@
         <fieldset>
           <legend>DNS</legend>
           <label>Domain to resolve<input type="text" name="dnsTestSite" spellcheck="false"></label>
-          <div class="hint">Mark the server your network actually uses as “mine”. Its response time feeds the score.</div>
+          <div class="hint">Mark the server your network uses as “mine”; its response time feeds the score. With “auto”, it follows whichever network you're connected to.</div>
           <div id="dns-list" class="dns-list"></div>
           <button type="button" class="btn btn-small" id="dns-add">Add server</button>
         </fieldset>
@@ -131,6 +172,16 @@
           <label class="check"><input type="checkbox" name="speedtestEnabled"> Run speed tests automatically</label>
           <div class="hint">Uses speed.cloudflare.com. Each test transfers up to ~1 GB on fast lines (about 200 MB at 100 Mbps). Leave off on metered connections.</div>
           <label>Interval (minutes)<input type="number" name="speedtestIntervalMin" min="5" max="1440"></label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Alerts</legend>
+          <label class="check"><input type="checkbox" name="alertsNotify"> Notify me when an outage or slowdown starts and ends</label>
+          <div class="hint">An outage is 2 probes in a row where no site answers. A slowdown is 3 probes in a row below the score or above the loss below.</div>
+          <div class="row">
+            <label>Slowdown below score (%)<input type="number" name="degradedScore" min="0" max="100"></label>
+            <label>…or packet loss at least (%)<input type="number" name="degradedLoss" min="0.1" max="100" step="0.1"></label>
+          </div>
         </fieldset>
 
         <fieldset>
@@ -149,7 +200,7 @@
         <fieldset>
           <legend>App</legend>
           <label class="check"><input type="checkbox" name="openAtLogin"> Start with Windows / at login (runs in the tray)</label>
-          <label class="check"><input type="checkbox" name="wifiWarning"> Warn when connected over Wi-Fi</label>
+          <label class="check"><input type="checkbox" name="wifiWarning"> Warn when connected over Wi-Fi or a VPN</label>
           <label>Keep history for (days)<input type="number" name="retentionDays" min="1" max="365"></label>
           <button type="button" class="btn btn-danger btn-small" id="clear-history">Clear all history</button>
         </fieldset>

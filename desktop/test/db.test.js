@@ -123,3 +123,111 @@ test('data persists across reopening the store', (t) => {
   assert.strictEqual(b.history(Date.now() - HOUR).runs[0].score, 0.5);
   b.close();
 });
+
+// ------------------------------------------------------------ 1.1 additions
+
+test('upgrades a 1.0 database in place', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'np-db-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { DatabaseSync } = require('node:sqlite');
+  const old = new DatabaseSync(path.join(dir, 'netprobe.db'));
+  old.exec('CREATE TABLE runs (ts INTEGER PRIMARY KEY, score REAL, latency REAL, loss REAL, jitter REAL, dns_latency REAL)');
+  old.exec(`INSERT INTO runs VALUES (${Date.now() - 1000}, 0.7, 10, 0, 1, 5)`);
+  old.close();
+  const store = new Store(dir);
+  const h = store.history(Date.now() - HOUR);
+  assert.strictEqual(h.runs[0].score, 0.7);
+  assert.strictEqual(h.runs[0].gw_latency, null);
+  store.saveProbe(Date.now(), result(), summary(), { conn: 'wired' });
+  store.close();
+});
+
+test('stores connection, verdict and path per probe', (t) => {
+  const { store } = tempStore(t);
+  const r = { ...result(), path: { gateway: { latency: 2, loss: 0 }, isp: { latency: 9, loss: 1 } } };
+  store.saveProbe(Date.now(), r, summary(), { conn: 'wifi', level: 'degraded', location: 'isp', settling: false });
+  const row = store.db.prepare('SELECT conn, level, location, gw_latency, isp_loss, settling FROM runs').get();
+  assert.deepStrictEqual({ ...row }, { conn: 'wifi', level: 'degraded', location: 'isp', gw_latency: 2, isp_loss: 1, settling: 0 });
+  const h = store.history(Date.now() - HOUR);
+  assert.strictEqual(h.runs[0].gw_latency, 2);
+  assert.strictEqual(h.runs[0].isp_latency, 9);
+});
+
+test('history can be limited to one connection type', (t) => {
+  const { store } = tempStore(t);
+  store.saveProbe(Date.now() - 20 * 60_000, result(10), summary(0.9), { conn: 'wired' });
+  store.saveProbe(Date.now() - 1000, result(50), summary(0.5), { conn: 'wifi' });
+  const wired = store.history(Date.now() - HOUR, { conn: 'wired' });
+  assert.deepStrictEqual(wired.runs.map((r) => r.score), [0.9]);
+  assert.ok(wired.sites.every((s) => s.site !== 'a.com' || s.latency === 10));
+  assert.strictEqual(wired.dns.length, 2);
+  // Unknown filter values are ignored rather than injected into SQL.
+  assert.strictEqual(store.history(Date.now() - HOUR, { conn: "x' OR 1=1" }).runs.length, 2);
+});
+
+const incident = (start, extra = {}) => ({
+  start, end: null, kind: 'outage', where: 'isp', conn: 'wired', worstScore: 0, maxLoss: 100, maxLatency: null, probes: 2, ...extra,
+});
+
+test('saves, updates and lists incidents with traces', (t) => {
+  const { store } = tempStore(t);
+  const start = Date.now() - 10 * 60_000;
+  store.saveIncident(incident(start));
+  store.saveIncident(incident(start, { end: start + 60_000, probes: 4, kind: 'outage' }));
+  store.saveTrace(start, '1 192.168.1.1');
+  const [row] = store.incidents(Date.now() - HOUR);
+  assert.strictEqual(row.end, start + 60_000);
+  assert.strictEqual(row.probes, 4);
+  assert.strictEqual(row.location, 'isp');
+  assert.strictEqual(row.trace, '1 192.168.1.1');
+  // History includes incidents for chart bands, without the bulky trace.
+  const h = store.history(Date.now() - HOUR);
+  assert.strictEqual(h.incidents.length, 1);
+  assert.ok(!('trace' in h.incidents[0]));
+});
+
+test('open incidents are listed even if they started before the window', (t) => {
+  const { store } = tempStore(t);
+  store.saveIncident(incident(Date.now() - 3 * HOUR));
+  assert.strictEqual(store.incidents(Date.now() - HOUR).length, 1);
+});
+
+test('closeDangling ends incidents left open by a crash at their last probe', (t) => {
+  const { store } = tempStore(t);
+  const start = Date.now() - 5 * 60_000;
+  store.saveIncident(incident(start));
+  store.saveProbe(start + 30_000, result(), summary(0));
+  store.saveProbe(start + 60_000, result(), summary(0));
+  store.saveIncident(incident(start - DAY)); // no probes after it at all
+  store.closeDangling();
+  const rows = store.incidents(Date.now() - 2 * DAY);
+  assert.strictEqual(rows.find((r) => r.start === start).end, start + 60_000);
+  // No probes after the older one: it ends where it started... unless the
+  // newer probes count, which they do (MAX(ts) >= start), so it ends there.
+  assert.strictEqual(rows.find((r) => r.start === start - DAY).end, start + 60_000);
+  assert.ok(rows.every((r) => r.end != null));
+});
+
+test('uptime counts outage time against monitored time only', (t) => {
+  const { store } = tempStore(t);
+  const now = Date.now();
+  assert.deepStrictEqual(store.uptime(now - DAY, 30_000), { uptime: null, incidents: 0, outageMs: 0 });
+  // 120 probes x 30 s = 1 h monitored; a 6 minute outage and a slowdown.
+  for (let i = 0; i < 120; i++) store.saveProbe(now - i * 30_000, result(), summary());
+  store.saveIncident(incident(now - 30 * 60_000, { end: now - 24 * 60_000 }));
+  store.saveIncident(incident(now - 10 * 60_000, { end: now - 9 * 60_000, kind: 'degraded' }));
+  const u = store.uptime(now - DAY, 30_000);
+  assert.strictEqual(u.incidents, 2);
+  assert.strictEqual(u.outageMs, 6 * 60_000);
+  assert.ok(Math.abs(u.uptime - 0.9) < 0.001, `uptime ${u.uptime}`);
+});
+
+test('prune and clear include incidents', (t) => {
+  const { store } = tempStore(t);
+  store.saveIncident(incident(Date.now() - 40 * DAY, { end: Date.now() - 40 * DAY + 1000 }));
+  store.saveIncident(incident(Date.now() - DAY, { end: Date.now() - DAY + 1000 }));
+  store.prune(30);
+  assert.strictEqual(store.incidents(0).length, 1);
+  store.clear();
+  assert.strictEqual(store.incidents(0).length, 0);
+});

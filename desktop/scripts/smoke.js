@@ -57,10 +57,11 @@ app.whenReady().then(async () => {
     uplot: typeof window.uPlot === 'function',
     gauge: !!document.querySelector('#gauge-fill'),
     charts: document.querySelectorAll('.chart').length,
-    wifiBanner: !!document.querySelector('#wifi-banner'),
+    netBanner: !!document.querySelector('#net-banner'),
+    path: document.querySelectorAll('.path .node').length,
   })`);
   log('ui', JSON.stringify(ui));
-  if (!ui.lib || !ui.bridge || !ui.uplot || !ui.gauge || !ui.wifiBanner || ui.charts !== 6) {
+  if (!ui.lib || !ui.bridge || !ui.uplot || !ui.gauge || !ui.netBanner || ui.path !== 4 || ui.charts !== 7) {
     clearTimeout(timer);
     return finish(1, 'FAIL: dashboard did not initialise');
   }

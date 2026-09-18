@@ -126,7 +126,7 @@ test('site list is trimmed, de-blanked and capped at 20', () => {
 
 test('DNS servers without an IP are dropped; an empty list is restored', () => {
   const s = validate({ ...defaults(), dnsServers: [{ name: 'no ip' }, { ip: ' 9.9.9.9 ' }] });
-  assert.deepStrictEqual(s.dnsServers, [{ name: '9.9.9.9', ip: '9.9.9.9', home: true }]);
+  assert.deepStrictEqual(s.dnsServers, [{ name: '9.9.9.9', ip: '9.9.9.9', home: true, auto: false }]);
   const empty = validate({ ...defaults(), dnsServers: [] });
   assert.strictEqual(empty.dnsServers.find((d) => d.home).ip, '10.0.0.1');
 });
@@ -134,6 +134,22 @@ test('DNS servers without an IP are dropped; an empty list is restored', () => {
 test('the last DNS server becomes home when none is marked', () => {
   const s = validate({ ...defaults(), dnsServers: [{ name: 'a', ip: '1.1.1.1' }, { name: 'b', ip: '2.2.2.2' }] });
   assert.deepStrictEqual(s.dnsServers.map((d) => d.home), [false, true]);
+});
+
+test('home DNS servers follow the network by default, others never do', () => {
+  const s = validate({
+    ...defaults(),
+    dnsServers: [{ name: 'a', ip: '1.1.1.1', auto: true }, { name: 'b', ip: '2.2.2.2', home: true }],
+  });
+  assert.deepStrictEqual(s.dnsServers.map((d) => d.auto), [false, true]);
+  const pinned = validate({ ...defaults(), dnsServers: [{ name: 'b', ip: '2.2.2.2', home: true, auto: false }] });
+  assert.strictEqual(pinned.dnsServers[0].auto, false);
+});
+
+test('alert settings have defaults and are clamped', () => {
+  assert.deepStrictEqual(defaults().alerts, { notify: true, degradedScore: 0.6, degradedLoss: 2 });
+  const s = validate({ ...defaults(), alerts: { notify: 0, degradedScore: 5, degradedLoss: -1 } });
+  assert.deepStrictEqual(s.alerts, { notify: false, degradedScore: 1, degradedLoss: 0.1 });
 });
 
 test('booleans are coerced', () => {

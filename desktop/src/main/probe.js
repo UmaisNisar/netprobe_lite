@@ -117,13 +117,27 @@ async function dnsTest(site, server, timeoutMs = 5000) {
   }
 }
 
-async function collect(settings) {
-  const sites = settings.sites.filter(Boolean);
-  const [stats, dns] = await Promise.all([
-    Promise.all(sites.map((s) => pingSite(s, settings.pingCount))),
-    Promise.all(settings.dnsServers.map((srv) => dnsTest(settings.dnsTestSite, srv))),
-  ]);
-  return { stats, dns };
+// Pings along the path (your router, then the ISP's first router) use a
+// smaller count: they only need to show whether each segment is healthy.
+const PATH_PINGS = 20;
+
+async function pingHop(ip, count) {
+  if (!ip) return null;
+  const r = await pingSite(ip, Math.min(PATH_PINGS, count));
+  return { ip, latency: r.latency, loss: r.loss, jitter: r.jitter };
 }
 
-module.exports = { collect, pingSite, runPing, dnsTest, parseRtts, jitterOf, deps, DNS_FAIL_MS };
+// `path` is { gateway, isp } IPs (either may be null); `dnsServers`
+// overrides settings.dnsServers (e.g. with the auto-detected home server).
+async function collect(settings, { path = {}, dnsServers = settings.dnsServers } = {}) {
+  const sites = settings.sites.filter(Boolean);
+  const [stats, dns, gateway, isp] = await Promise.all([
+    Promise.all(sites.map((s) => pingSite(s, settings.pingCount))),
+    Promise.all(dnsServers.map((srv) => dnsTest(settings.dnsTestSite, srv))),
+    pingHop(path.gateway, settings.pingCount),
+    pingHop(path.isp, settings.pingCount),
+  ]);
+  return { stats, dns, path: { gateway, isp } };
+}
+
+module.exports = { collect, pingSite, pingHop, runPing, dnsTest, parseRtts, jitterOf, deps, DNS_FAIL_MS, PATH_PINGS };
