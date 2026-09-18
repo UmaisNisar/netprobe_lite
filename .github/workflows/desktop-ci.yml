@@ -1,0 +1,112 @@
+name: Desktop CI
+
+# Lint, unit tests with coverage, an end-to-end Electron smoke test and a
+# packaging check on every OS. Also called by the release workflow so a
+# release can't ship without passing it.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-*.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-*.yml'
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      skip-package:
+        description: Skip the packaging check (the caller builds its own)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: desktop
+
+jobs:
+  lint-and-coverage:
+    name: Lint + unit tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.13 is the oldest Node with unflagged node:sqlite; Electron 44 ships Node 24.
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test:coverage
+
+  test:
+    name: Tests + smoke + package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            dist: dist:win
+          - os: macos-latest
+            dist: dist:mac
+          - os: ubuntu-latest
+            dist: dist:linux
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+      - name: Prepare Linux display and sandbox
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q xvfb
+          # Ubuntu 24+ blocks the unprivileged user namespaces Chromium's sandbox uses.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Electron smoke test
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run --auto-servernum npx electron scripts/smoke.js
+          else
+            npx electron scripts/smoke.js
+          fi
+
+      - name: Package (unsigned)
+        if: ${{ !inputs.skip-package }}
+        run: npm run ${{ matrix.dist }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload test build
+        if: ${{ !inputs.skip-package }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-build-${{ matrix.os }}
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.dmg
+            desktop/dist/*.AppImage
+          retention-days: 7
+          if-no-files-found: error

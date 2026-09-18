@@ -1,7 +1,7 @@
-/* global uPlot */
 'use strict';
 
 const api = window.netprobe;
+const { fmt, mbps, fmtMbps, timeAgo, level, scoreCaption, pivot, esc } = window.NetprobeLib;
 const $ = (sel) => document.querySelector(sel);
 
 let state = null;
@@ -12,27 +12,7 @@ let lastSpeedTs = null;
 
 // ------------------------------------------------------------ formatting
 
-const fmt = (v, digits = 1) => (v == null || !Number.isFinite(v) ? '–' : v.toFixed(digits));
-const mbps = (bps) => (bps == null ? null : bps / 1e6);
-const fmtMbps = (bps) => {
-  const v = mbps(bps);
-  return v == null ? '–' : v >= 100 ? v.toFixed(0) : v.toFixed(1);
-};
-const timeAgo = (ts) => {
-  const s = Math.round((Date.now() - ts) / 1000);
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.round(s / 60)} min ago`;
-  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
-  return new Date(ts).toLocaleString();
-};
 
-// Colour a value relative to its score threshold.
-function level(value, threshold) {
-  if (value == null) return '';
-  if (value < threshold * 0.5) return 'v-good';
-  if (value < threshold) return 'v-ok';
-  return 'v-bad';
-}
 
 function scoreColor(score) {
   const css = getComputedStyle(document.documentElement);
@@ -42,13 +22,6 @@ function scoreColor(score) {
   return css.getPropertyValue('--bad');
 }
 
-function scoreCaption(score) {
-  if (score >= 0.9) return 'Excellent — your connection is healthy';
-  if (score >= 0.8) return 'Good';
-  if (score >= 0.6) return 'Fair — some latency, jitter or loss';
-  if (score >= 0.4) return 'Poor — noticeable problems';
-  return 'Bad — significant loss or delay';
-}
 
 // ------------------------------------------------------------ live state
 
@@ -152,39 +125,11 @@ function renderState() {
   renderStatus();
 }
 
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-}
 
 // ------------------------------------------------------------ charts
 
 const PALETTE = ['#5b8def', '#3ecf8e', '#f6c343', '#e879a6', '#a78bfa', '#22c1d6', '#f59e5b', '#94a3b8'];
 
-// Pivot rows of {ts, key, value} into uPlot's aligned [xs, ...ys] format,
-// inserting nulls where the PC was off so lines break instead of bridging.
-function pivot(rows, keyField, valueFn, gapMs) {
-  const xsSet = new Set();
-  const keys = [];
-  const byKey = new Map();
-  for (const r of rows) {
-    xsSet.add(r.ts);
-    const k = keyField ? r[keyField] : '_';
-    if (!byKey.has(k)) {
-      byKey.set(k, new Map());
-      keys.push(k);
-    }
-    byKey.get(k).set(r.ts, valueFn(r));
-  }
-  let xs = [...xsSet].sort((a, b) => a - b);
-  const withGaps = [];
-  for (let i = 0; i < xs.length; i++) {
-    if (i && xs[i] - xs[i - 1] > gapMs) withGaps.push(xs[i - 1] + 1);
-    withGaps.push(xs[i]);
-  }
-  xs = withGaps;
-  const ys = keys.map((k) => xs.map((x) => byKey.get(k).get(x) ?? null));
-  return { xs: xs.map((x) => x / 1000), keys, ys };
-}
 
 function axisColors() {
   const css = getComputedStyle(document.documentElement);

@@ -2,11 +2,12 @@
 // nameserver. Port of helpers/network_helper.py that works on Windows, macOS
 // and Linux without admin rights by driving the OS ping binary.
 
-const { spawn } = require('node:child_process');
+const childProcess = require('node:child_process');
 const { Resolver } = require('node:dns').promises;
 const { performance } = require('node:perf_hooks');
 
-const IS_WIN = process.platform === 'win32';
+// Swappable in tests.
+const deps = { spawn: childProcess.spawn, platform: process.platform };
 
 // Reply lines carry the RTT as "time=12ms" (Windows), "time<1ms" (Windows,
 // sub-millisecond) or "time=12.3 ms" (Unix). The keyword is localised on
@@ -32,16 +33,16 @@ function parseRtts(output) {
 
 function runPing(host, count, timeoutMs) {
   let args;
-  if (IS_WIN) args = ['-n', String(count), '-w', String(timeoutMs), host];
+  if (deps.platform === 'win32') args = ['-n', String(count), '-w', String(timeoutMs), host];
   // macOS takes -W in milliseconds, Linux (iputils) in seconds.
-  else if (process.platform === 'darwin') args = ['-n', '-c', String(count), '-W', String(timeoutMs), host];
+  else if (deps.platform === 'darwin') args = ['-n', '-c', String(count), '-W', String(timeoutMs), host];
   else args = ['-n', '-c', String(count), '-W', String(Math.ceil(timeoutMs / 1000)), host];
 
   return new Promise((resolve) => {
     let out = '';
     let child;
     try {
-      child = spawn('ping', args, { windowsHide: true });
+      child = deps.spawn('ping', args, { windowsHide: true });
     } catch {
       resolve({ sent: count, rtts: [] });
       return;
@@ -100,8 +101,8 @@ async function pingSite(site, count, parallel = 5) {
 
 const DNS_FAIL_MS = 5000; // Same penalty value the original used for failures.
 
-async function dnsTest(site, server) {
-  const resolver = new Resolver({ timeout: 5000, tries: 1 });
+async function dnsTest(site, server, timeoutMs = 5000) {
+  const resolver = new Resolver({ timeout: timeoutMs, tries: 1 });
   try {
     resolver.setServers([server.ip]);
   } catch {
@@ -125,4 +126,4 @@ async function collect(settings) {
   return { stats, dns };
 }
 
-module.exports = { collect, parseRtts, jitterOf };
+module.exports = { collect, pingSite, runPing, dnsTest, parseRtts, jitterOf, deps, DNS_FAIL_MS };

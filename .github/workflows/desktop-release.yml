@@ -1,76 +1,99 @@
-name: Desktop app release
+name: Desktop release
 
-# Builds Netprobe Desktop for Windows, macOS (Apple Silicon + Intel) and Linux.
-# Push a tag like desktop-v1.0.0 to build and publish a GitHub Release, or run it
-# manually from the Actions tab to just get the build artifacts.
+# Push a tag like desktop-v1.2.3 to run the full CI, build installers for
+# Windows, macOS (Apple Silicon + Intel) and Linux stamped with that version,
+# and publish them as a GitHub Release with SHA-256 checksums.
 
 on:
   push:
     tags: ['desktop-v*']
-  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  version:
+    name: Check tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#desktop-v}"
+          if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' is not desktop-v<semver>"
+            exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+  ci:
+    name: CI
+    needs: version
+    uses: ./.github/workflows/desktop-ci.yml
+    with:
+      skip-package: true
+
   build:
+    name: Build (${{ matrix.os }})
+    needs: [version, ci]
+    runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - os: windows-latest
-            script: dist:win
-            files: |
-              desktop/dist/*.exe
+            dist: dist:win
           - os: macos-latest
-            script: dist:mac
-            files: |
-              desktop/dist/*.dmg
+            dist: dist:mac
           - os: ubuntu-latest
-            script: dist:linux
-            files: |
-              desktop/dist/*.AppImage
-    runs-on: ${{ matrix.os }}
+            dist: dist:linux
     defaults:
       run:
         working-directory: desktop
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: desktop/package-lock.json
-
       - run: npm ci
-
-      - run: npm test
-
+      - name: Stamp version from tag
+        run: npm version ${{ needs.version.outputs.version }} --no-git-tag-version --allow-same-version
       - name: Build
-        run: npm run ${{ matrix.script }}
+        run: npm run ${{ matrix.dist }}
         env:
           # No signing certificates: builds are unsigned.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
-          name: netprobe-${{ matrix.os }}
-          path: ${{ matrix.files }}
+          name: release-${{ matrix.os }}
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.dmg
+            desktop/dist/*.AppImage
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/desktop-v')
-    needs: build
+    name: Publish release
+    needs: [version, build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
+          pattern: release-*
           merge-multiple: true
-
-      - uses: softprops/action-gh-release@v2
+      - name: Checksums
+        working-directory: artifacts
+        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v3
         with:
-          name: Netprobe Desktop ${{ github.ref_name }}
+          name: Netprobe Desktop ${{ needs.version.outputs.version }}
           files: artifacts/*
           generate_release_notes: true
+          prerelease: ${{ contains(needs.version.outputs.version, '-') }}

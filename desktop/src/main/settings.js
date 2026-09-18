@@ -39,6 +39,9 @@ function systemDns() {
   return detectedDns;
 }
 
+// Swappable in tests.
+const deps = { systemDns };
+
 // Detecting the system resolver shells out to PowerShell on Windows, so it
 // only happens when the user has no saved DNS list (first run, or emptied).
 function defaults({ detectDns = false } = {}) {
@@ -50,7 +53,7 @@ function defaults({ detectDns = false } = {}) {
       { name: 'Quad9 DNS', ip: '9.9.9.9' },
       { name: 'Cloudflare DNS', ip: '1.1.1.1' },
       // Defaults to whatever resolver this PC is configured to use.
-      { name: 'My DNS Server', ip: detectDns ? systemDns() : '8.8.8.8', home: true },
+      { name: 'My DNS Server', ip: detectDns ? deps.systemDns() : '8.8.8.8', home: true },
     ],
     probeInterval: 30, // seconds
     pingCount: 50, // pings per site per probe
@@ -130,4 +133,4 @@ function validate(s) {
   return s;
 }
 
-module.exports = { Settings, defaults };
+module.exports = { Settings, defaults, validate, systemDns, deps };

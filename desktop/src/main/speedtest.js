@@ -9,14 +9,17 @@
 
 const { performance } = require('node:perf_hooks');
 
-const BASE = 'https://speed.cloudflare.com';
-const STREAMS = 4;
-const DURATION_MS = 8000;
-const MAX_BYTES = 500_000_000;
-const REQUEST_BYTES = 50_000_000;
+const DEFAULTS = {
+  base: 'https://speed.cloudflare.com',
+  streams: 4,
+  durationMs: 8000,
+  maxBytes: 500_000_000,
+  requestBytes: 50_000_000,
+  fetch: (...args) => fetch(...args),
+};
 const UP_BLOCK = new Uint8Array(256 * 1024);
 
-const done = (deadline, counter) => performance.now() >= deadline || counter.bytes >= MAX_BYTES;
+const done = (deadline, counter, o) => performance.now() >= deadline || counter.bytes >= o.maxBytes;
 
 class HttpError extends Error {
   constructor(what, status) {
@@ -29,25 +32,25 @@ class HttpError extends Error {
   }
 }
 
-async function downloadStream(deadline, counter, signal) {
-  while (!done(deadline, counter)) {
-    const res = await fetch(`${BASE}/__down?bytes=${REQUEST_BYTES}`, { signal, cache: 'no-store' });
+async function downloadStream(deadline, counter, signal, o) {
+  while (!done(deadline, counter, o)) {
+    const res = await o.fetch(`${o.base}/__down?bytes=${o.requestBytes}`, { signal, cache: 'no-store' });
     if (!res.ok || !res.body) throw new HttpError('Download', res.status);
     for await (const chunk of res.body) {
       counter.bytes += chunk.byteLength;
-      if (done(deadline, counter)) break; // leaving the loop cancels the body
+      if (done(deadline, counter, o)) break; // leaving the loop cancels the body
     }
   }
 }
 
-async function uploadStream(deadline, counter, signal) {
-  while (!done(deadline, counter)) {
+async function uploadStream(deadline, counter, signal, o) {
+  while (!done(deadline, counter, o)) {
     let sent = 0;
     // Bytes are counted as the request body is pulled onto the socket, so a
     // slow uplink still gets a measurement when the deadline cuts it short.
     const body = new ReadableStream({
       pull(controller) {
-        if (done(deadline, counter) || sent >= REQUEST_BYTES) {
+        if (done(deadline, counter, o) || sent >= o.requestBytes) {
           controller.close();
           return;
         }
@@ -56,37 +59,39 @@ async function uploadStream(deadline, counter, signal) {
         counter.bytes += UP_BLOCK.byteLength;
       },
     });
-    const res = await fetch(`${BASE}/__up`, { method: 'POST', body, duplex: 'half', signal });
+    const res = await o.fetch(`${o.base}/__up`, { method: 'POST', body, duplex: 'half', signal });
     if (!res.ok) throw new HttpError('Upload', res.status);
     await res.arrayBuffer();
   }
 }
 
-async function measure(stream) {
+async function measure(stream, o) {
   const controller = new AbortController();
   const counter = { bytes: 0 };
   const start = performance.now();
-  const deadline = start + DURATION_MS;
+  const deadline = start + o.durationMs;
   // Hard stop for anything still in flight well after the window closes.
-  const stop = setTimeout(() => controller.abort(), DURATION_MS + 20000);
+  const stop = setTimeout(() => controller.abort(), o.durationMs + 20000);
   const results = await Promise.allSettled(
-    Array.from({ length: STREAMS }, () => stream(deadline, counter, controller.signal))
+    Array.from({ length: o.streams }, () => stream(deadline, counter, controller.signal, o))
   );
   clearTimeout(stop);
-  const elapsed = Math.min(performance.now() - start, DURATION_MS) / 1000;
+  const elapsed = Math.min(performance.now() - start, o.durationMs) / 1000;
   controller.abort();
   const failed = results.find((r) => r.status === 'rejected');
   // Any failed stream makes the number meaningless (it would under-report).
   if (failed || counter.bytes === 0) throw failed ? failed.reason : new Error('No data transferred');
   // Streams that hit the byte cap finish early; use the real duration then.
-  const seconds = counter.bytes >= MAX_BYTES ? (performance.now() - start) / 1000 : elapsed;
+  const seconds = counter.bytes >= o.maxBytes ? (performance.now() - start) / 1000 : elapsed;
   return (counter.bytes * 8) / seconds; // bits per second
 }
 
-async function run() {
-  const download = await measure(downloadStream);
-  const upload = await measure(uploadStream);
+// Options exist for tests; the app always uses the defaults.
+async function run(options = {}) {
+  const o = { ...DEFAULTS, ...options };
+  const download = await measure(downloadStream, o);
+  const upload = await measure(uploadStream, o);
   return { download, upload };
 }
 
-module.exports = { run };
+module.exports = { run, HttpError, DEFAULTS };

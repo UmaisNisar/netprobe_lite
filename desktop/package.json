@@ -8,8 +8,12 @@
   "homepage": "https://github.com/UmaisNisar/netprobe_lite",
   "scripts": {
     "start": "electron .",
-    "icons": "electron scripts/make-icons.js",
+    "lint": "eslint .",
     "test": "node --test \"test/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=\"src/**\" --test-coverage-exclude=\"src/main/main.js\" --test-coverage-exclude=\"src/renderer/app.js\" --test-coverage-exclude=\"src/preload.js\" --test-coverage-lines=90 --test-coverage-functions=90 --test-coverage-branches=80 \"test/*.test.js\"",
+    "smoke": "electron scripts/smoke.js",
+    "check": "npm run lint && npm run test:coverage",
+    "icons": "electron scripts/make-icons.js",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
@@ -19,8 +23,11 @@
     "uplot": "^1.6.32"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "electron": "^44.4.2",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "eslint": "^10.10.0",
+    "globals": "^17.12.0"
   },
   "build": {
     "appId": "com.netprobe.desktop",
@@ -88,5 +95,8 @@
       "title": "Netprobe ${version}"
     },
     "publish": null
+  },
+  "engines": {
+    "node": ">=22.13"
   }
 }
