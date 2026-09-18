@@ -2,7 +2,7 @@
 // window, tray, notifications, power events and IPC; all measuring and
 // scheduling lives in monitor.js.
 
-const { app, BrowserWindow, Tray, Menu, Notification, dialog, ipcMain, nativeImage, powerMonitor, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, Notification, dialog, ipcMain, nativeImage, nativeTheme, powerMonitor, shell } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const report = require('./report');
@@ -49,7 +49,7 @@ function createWindow() {
     minWidth: 380,
     minHeight: 500,
     show: false,
-    backgroundColor: '#0f1115',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0f1115' : '#f4f6fa',
     title: 'Netprobe',
     icon: path.join(ASSETS, 'icon.png'),
     autoHideMenuBar: true,
@@ -192,6 +192,7 @@ function saveSettings(next) {
   monitor.applySettings(before, saved);
   applyLoginItem();
   applyUpdater();
+  nativeTheme.themeSource = saved.theme;
   const changed = ['enabled', 'port', 'lan', 'token'].some((k) => before.server[k] !== saved.server[k]);
   if (changed) applyServer();
   return saved;
@@ -319,6 +320,8 @@ app.whenReady().then(() => {
     return;
   }
   settings = new Settings(dataDir);
+  // Native parts of the window (title bar, dialogs, scrollbars) follow the theme.
+  nativeTheme.themeSource = settings.get().theme;
   monitor = new Monitor({ settings, store: new Store(dataDir) });
 
   // The web server's URLs ride along with the state for the Settings screen.

@@ -13,6 +13,11 @@ module.exports = [
     },
   },
   {
+    // page.evaluate() callbacks run in the dashboard page.
+    files: ['test/e2e/**/*.js'],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+  },
+  {
     files: ['src/renderer/**/*.js'],
     languageOptions: { sourceType: 'script', globals: { ...globals.browser, uPlot: 'readonly' } },
   },

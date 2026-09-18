@@ -68,9 +68,10 @@ function defaults({ detectDns = false } = {}) {
     planDown: 0, // your plan's download speed in Mbps; 0 = not set
     planUp: 0,
     retentionDays: 30,
-    openAtLogin: true,
+    openAtLogin: false, // opt-in (welcome screen or Settings)
     autoUpdate: true, // check GitHub Releases for new versions
     onboarded: false, // the welcome screen has been completed
+    theme: 'system', // 'system' | 'light' | 'dark'
     // Built-in web dashboard + /metrics (always-on mode).
     server: {
       enabled: false,
@@ -79,7 +80,7 @@ function defaults({ detectDns = false } = {}) {
       token: '', // optional access token for other devices
     },
     alerts: {
-      notify: true, // OS notification when an incident starts / ends
+      notify: false, // OS notification when an incident starts / ends (opt-in)
       degradedScore: 0.6, // a probe below this score counts as degraded
       degradedLoss: 2, // ...or with at least this % packet loss
     },
@@ -184,6 +185,7 @@ function validate(s) {
   s.openAtLogin = !!s.openAtLogin;
   s.autoUpdate = s.autoUpdate !== false;
   s.onboarded = !!s.onboarded;
+  s.theme = ['light', 'dark'].includes(s.theme) ? s.theme : 'system';
   delete s.wifiWarning; // setting removed in 1.2 (no more banner)
   s.server = {
     enabled: !!s.server?.enabled,

@@ -1,6 +1,7 @@
 // Dev helper: starts the app normally, then saves PNGs of the dashboard.
 // Usage: electron scripts/screenshot.js <outPrefix> [delaySeconds] [--range=1h] [--click=#selector] [--profile=name]
-// Writes <outPrefix>-top.png and <outPrefix>-charts.png. Uses its own
+// Writes <outPrefix>-top.png (status + incidents) and <outPrefix>-charts.png
+// (history charts). Uses its own
 // userData folder ("Netprobe Dev") so real history is untouched.
 
 const { app, BrowserWindow } = require('electron');
@@ -41,11 +42,25 @@ app.whenReady().then(async () => {
     app.exit(0);
     return;
   }
-  await js('window.scrollTo(0, 0)');
-  await sleep(300);
-  await save('top');
-  await js(`document.querySelector('.history-head').scrollIntoView()`);
-  await sleep(800);
-  await save('charts');
+  // Grow the window to the whole page and crop each section, instead of
+  // scrolling (a scroll doesn't always land before the capture).
+  const [width] = win.getContentSize();
+  const pageHeight = await js('document.documentElement.scrollHeight');
+  win.setContentSize(width, pageHeight);
+  await sleep(1500); // charts re-render for the new size
+  const rects = await js(`(() => {
+    const top = (sel) => Math.round(document.querySelector(sel).getBoundingClientRect().top + scrollY);
+    const history = top('.history-head');
+    const charts = document.querySelector('.charts').getBoundingClientRect();
+    return {
+      top: { x: 0, y: 0, width: innerWidth, height: history - 8 },
+      charts: { x: 0, y: history - 12, width: innerWidth, height: Math.min(Math.round(charts.bottom + scrollY) - history + 24, 1400) },
+    };
+  })()`);
+  for (const [name, rect] of Object.entries(rects)) {
+    const file = path.resolve(`${out}-${name}.png`);
+    fs.writeFileSync(file, (await win.webContents.capturePage(rect)).toPNG());
+    console.log('saved', file);
+  }
   app.exit(0);
 });

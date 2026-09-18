@@ -24,6 +24,7 @@ const STATIC = {
   '/styles.css': `${RENDERER}/styles.css`,
   '/report.js': `${RENDERER}/report.js`,
   '/web-bridge.js': `${RENDERER}/web-bridge.js`,
+  '/theme-boot.js': `${RENDERER}/theme-boot.js`,
   '/report-web.js': `${RENDERER}/report-web.js`,
   '/assets/icon.png': 'assets/icon.png',
   '/node_modules/uplot/dist/uPlot.iife.min.js': 'node_modules/uplot/dist/uPlot.iife.min.js',

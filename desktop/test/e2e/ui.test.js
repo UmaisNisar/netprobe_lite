@@ -152,3 +152,37 @@ test('an outage shows the incident strip, verdict and incident row', async (t) =
   await row.getByRole('button', { name: 'Traceroute' }).click();
   await page.locator('#incident-rows pre').getByText(/traceroute to \S+ \(test\)/).waitFor();
 });
+
+test('the light/dark toggle switches instantly and is remembered', async (t) => {
+  const { page, readSettings } = await launch(t, { settings: { ...onboarded, theme: 'dark' } });
+  const html = page.locator('html');
+  await page.locator('#s-latency').getByText('12.3').waitFor();
+  assert.strictEqual(await html.getAttribute('data-theme'), 'dark');
+  const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  const darkBg = await bg();
+  await page.getByRole('button', { name: 'Switch light / dark mode' }).click();
+  assert.strictEqual(await html.getAttribute('data-theme'), 'light');
+  assert.notStrictEqual(await bg(), darkBg);
+  // The save is asynchronous; wait for it to reach the file.
+  for (let i = 0; i < 50 && readSettings().theme !== 'light'; i++) await new Promise((r) => setTimeout(r, 100));
+  assert.strictEqual(readSettings().theme, 'light');
+  // Settings can go back to following the system.
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const form = page.locator('#settings-form');
+  assert.strictEqual(await form.locator('select[name=theme]').inputValue(), 'light');
+  await form.locator('select[name=theme]').selectOption('system');
+  await form.getByRole('button', { name: 'Save' }).click();
+  await page.locator('#settings').waitFor({ state: 'hidden' });
+  assert.strictEqual(await html.getAttribute('data-theme'), null);
+  assert.strictEqual(readSettings().theme, 'system');
+});
+
+test('charts always span the selected range, even with a single point', async (t) => {
+  const { page } = await launch(t, { settings: onboarded });
+  await page.locator('#c-score .uplot').waitFor();
+  // One probe so far; the default 6 h window must still be shown.
+  const span = async (sel) => Number(await page.locator(sel).getAttribute('data-span'));
+  assert.ok(Math.abs((await span('#c-score')) - 6 * 3600) < 5, `span ${await span('#c-score')}`);
+  await page.getByRole('tab', { name: '1h' }).click();
+  await page.waitForFunction(() => Math.abs(Number(document.querySelector('#c-latency').dataset.span) - 3600) < 5);
+});

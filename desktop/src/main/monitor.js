@@ -184,6 +184,8 @@ class Monitor extends EventEmitter {
     const interval = this.settings.get().probeInterval * 1000;
     const delay = delayMs ?? interval;
     state.nextProbeAt = deps.now() + delay;
+    // Tell the UI: the probe that just finished emitted the old time.
+    this.#emitState();
     this.timers.probe = deps.setTimeout(async () => {
       // A timer firing far too late means the machine slept without telling
       // us (no suspend event); treat it like a wake-up.
@@ -274,6 +276,7 @@ class Monitor extends EventEmitter {
       delay = Math.max(delay, state.speedBackoffMs);
     }
     state.nextSpeedtestAt = now + delay;
+    this.#emitState();
     this.timers.speed = deps.setTimeout(async () => {
       await this.runSpeedtest({ scheduled: true });
       this.scheduleSpeedtest(this.settings.get().speedtestSchedule === 'times' ? undefined : Math.max(this.settings.get().speedtestInterval * 1000, state.speedBackoffMs));

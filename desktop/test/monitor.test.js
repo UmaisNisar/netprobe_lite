@@ -137,6 +137,17 @@ test('start waits for connection detection, probes at once, then every interval'
   assert.strictEqual(monitor.state.nextProbeAt, clock.now() + 30_000);
 });
 
+test('the state sent after each probe carries the next probe time (regression: "next probe in 0s")', async (t) => {
+  const { monitor, clock } = setup(t);
+  const states = [];
+  monitor.on('state', (s) => states.push(s));
+  monitor.start();
+  await clock.advance(30_000);
+  const last = states.at(-1);
+  assert.strictEqual(last.probing, false);
+  assert.strictEqual(last.nextProbeAt, clock.now() + 30_000, 'future, not the probe that just ran');
+});
+
 test('the first probe still runs if detection hangs', async (t) => {
   const { monitor, clock, net } = setup(t);
   monitor.deps.detectConnection = () => new Promise(() => {});

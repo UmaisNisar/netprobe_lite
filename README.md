@@ -46,9 +46,10 @@ The builds are not code-signed yet (signing certificates cost money; see [Code s
 - **Speed tests on your terms.** Enter your plan's speeds to see results as a % of what you pay for. Run tests every N minutes or at set times of day (e.g. peak vs off-peak), and cap how much data automatic tests may use each month.
 - **Always on, if you want.** Share the dashboard with other devices on your network, run Netprobe headless on a home server or Raspberry Pi, and point Prometheus/Grafana at `/metrics`. The original Grafana dashboard works unchanged. See [Always-on mode](#always-on-mode).
 - **Keeps itself up to date.** New versions install in the background on Windows and Linux (on restart). On macOS you get a notification with a download link.
+- **Light and dark mode.** Switch with the sun/moon button in the top bar, or follow your system (Settings → Appearance).
 - **Guided first run.** A short welcome screen shows your detected connection, router and DNS, and asks about speed tests, your plan, notifications and start-at-login.
 - **Runs in the tray.** Closing the window keeps monitoring. The tray icon turns green, amber or red with your score, and hovering it shows the current numbers.
-- **Starts at login** (optional, on by default) so history builds up without you thinking about it.
+- **Can start at login** (off by default; turn it on in the welcome screen or Settings) so history builds up without you thinking about it.
 - **Live dashboard:** a score gauge, current latency, loss, jitter, DNS and bandwidth, plus a per-site and per-DNS-server breakdown of the latest probe.
 - **History charts** for 1h, 6h, 24h, 7d or 30d, with synced crosshairs across all charts. Gaps show when the PC was off rather than drawing misleading lines.
 - **Settings in the app:** sites, DNS servers, probe interval, score weights, thresholds, speed test and retention. No `.env` editing.
@@ -125,12 +126,13 @@ Click **Settings** in the top-right corner of the dashboard.
 | Your plan | not set | Download/upload Mbps; results are shown as a % of the plan |
 | Monthly data budget | no limit | Automatic tests stop once they've used this many GB in the month |
 | Score weights / thresholds | 0.6 / 0.15 / 0.2 / 0.05 and 5% / 100 / 30 / 100 ms | Weights should add up to 1.0 |
-| Start at login | On | Starts hidden in the tray |
-| Notifications | On | Desktop notification when an incident starts and ends |
+| Start at login | Off | Starts hidden in the tray |
+| Notifications | Off | Desktop notification when an incident starts and ends |
 | Slowdown thresholds | score < 60% or loss ≥ 2% | What counts as a bad probe |
 | Keep history for | 30 days | Older data is deleted automatically |
 | Web dashboard & metrics | Off | Serves the dashboard and `/metrics` on port 7979; optionally to other devices, with an optional access token |
 | Keep up to date | On | Checks GitHub Releases every 6 hours |
+| Theme | Match my system | Or Light / Dark; the top-bar button switches instantly |
 
 The tray menu also has **Probe now**, **Run speed test now**, **Pause monitoring**, **Restart to update** (when an update is ready) and **Quit**.
 
@@ -274,7 +276,7 @@ npm run dist:linux   # -> dist/Netprobe-linux.AppImage
 | `test/settings.test.js` | Defaults, first-run DNS detection, validation and clamping, corrupt files, persistence |
 | `test/renderer-lib.test.js` | Dashboard formatting, colour levels, chart data pivoting and gap handling, HTML escaping |
 | `test/monitor.test.js` | The engine with a fake clock and network: scheduling, detection timeout, auto DNS, incidents with traceroute, network changes, sleep/wake and silent sleeps, pause, speed-test interval/times/back-off/budget, settings changes, crash recovery |
-| `test/e2e/ui.test.js` | The real app driven with Playwright: first-run welcome, live results and accessibility labels, settings saved and reloaded, DNS "auto" rules, history range and filter, export dialog, speed test with plan % and bufferbloat, a full outage scenario |
+| `test/e2e/ui.test.js` | The real app driven with Playwright: first-run welcome, live results and accessibility labels, settings saved and reloaded, DNS "auto" rules, history range and filter, charts spanning the selected range, export dialog, speed test with plan % and bufferbloat, light/dark toggle, a full outage scenario |
 | `test/metrics.test.js` | Prometheus output: original metric names/labels (Grafana compatibility), new metrics, missing values, escaping |
 | `test/server.test.js` | Web server: pages and assets, JSON API, CSV/report, SSE, actions, bad input, read-only viewers, token auth and cookies |
 | `test/service.test.js` | Data-folder lock (stale locks, other processes), headless CLI start/stop, updater version logic and both update modes |

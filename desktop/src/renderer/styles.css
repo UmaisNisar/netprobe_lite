@@ -14,8 +14,9 @@
   color-scheme: dark;
 }
 
+/* Light: follows the OS unless the user picked a theme (data-theme). */
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme="dark"]) {
     --bg: #f4f6fa;
     --surface: #ffffff;
     --surface-2: #f0f2f7;
@@ -29,6 +30,20 @@
     --grid: #e8ebf2;
     color-scheme: light;
   }
+}
+:root[data-theme="light"] {
+  --bg: #f4f6fa;
+  --surface: #ffffff;
+  --surface-2: #f0f2f7;
+  --border: #e1e5ee;
+  --text: #151922;
+  --muted: #5f6878;
+  --accent: #2f6fe4;
+  --good: #16a36b;
+  --ok: #c98a00;
+  --bad: #d63d3a;
+  --grid: #e8ebf2;
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -94,6 +109,16 @@ h3 { font-size: 13px; margin: 0 0 8px; font-weight: 600; color: var(--muted); }
 .btn-ghost { background: none; border-color: transparent; }
 .btn-small { padding: 4px 10px; font-size: 12px; }
 .btn-update { border-color: var(--good); color: var(--good); }
+.btn-icon { padding: 6px 8px; line-height: 0; }
+.btn-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+/* Show the icon for the theme you'd switch to. */
+.theme-sun { display: none; }
+:root[data-theme="dark"] .theme-sun { display: inline; }
+:root[data-theme="dark"] .theme-moon { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .theme-sun { display: inline; }
+  :root:not([data-theme]) .theme-moon { display: none; }
+}
 
 /* ---------- connection chip */
 

@@ -323,6 +323,12 @@ function incidentBands() {
   };
 }
 
+// The selected history range, in uPlot's seconds.
+function timeWindow() {
+  const now = Date.now();
+  return [(now - rangeMs) / 1000, now / 1000];
+}
+
 function makeChart(el, { xs, series, yRange, points = false }) {
   el.innerHTML = '';
   if (!xs.length) {
@@ -337,7 +343,14 @@ function makeChart(el, { xs, series, yRange, points = false }) {
     cursor: { sync: { key: 'np' }, points: { size: 6 }, drag: { x: true, y: false, setScale: true } },
     legend: { live: true },
     plugins: [incidentBands()],
-    scales: { x: { time: true }, y: yRange ? { range: yRange } : { auto: true } },
+    // Expose the visible time span (seconds) for tests and debugging.
+    hooks: { setScale: [(u, key) => key === 'x' && (el.dataset.span = Math.round(u.scales.x.max - u.scales.x.min))] },
+    scales: {
+      // A lone point (or a zoom narrower than a minute) would stretch the
+      // axis to years; fall back to the selected window instead.
+      x: { time: true, range: (_u, min, max) => (max - min < 60 ? timeWindow() : [min, max]) },
+      y: yRange ? { range: yRange } : { auto: true },
+    },
     axes: [axis, { ...axis, size: 48 }],
     series: [
       {},
@@ -354,6 +367,9 @@ function makeChart(el, { xs, series, yRange, points = false }) {
     ],
   };
   const u = new uPlot(opts, [xs, ...series.map((s) => s.data)], el);
+  // Always show the whole selected range (1h, 6h, ...), not just the data.
+  const [min, max] = timeWindow();
+  u.setScale('x', { min, max });
   fitToLegend(u, el);
   return u;
 }
@@ -480,6 +496,40 @@ $('#range').addEventListener('click', (e) => {
   loadHistory();
 });
 
+// ------------------------------------------------------------ theme
+
+let appliedTheme = null;
+
+function applyTheme(theme) {
+  if (theme === appliedTheme) return;
+  appliedTheme = theme;
+  const root = document.documentElement;
+  if (theme === 'light' || theme === 'dark') root.dataset.theme = theme;
+  else delete root.dataset.theme;
+  try {
+    localStorage.setItem('netprobe-theme', theme);
+  } catch {
+    // Storage unavailable: theme-boot.js will just follow the system.
+  }
+  if (state) {
+    renderState();
+    loadHistory(); // charts read their colours from the CSS variables
+  }
+}
+
+// The toggle flips whatever is showing now (system theme included).
+function effectiveTheme() {
+  const t = document.documentElement.dataset.theme;
+  if (t) return t;
+  return matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+
+$('#btn-theme').addEventListener('click', () => {
+  const next = effectiveTheme() === 'dark' ? 'light' : 'dark';
+  applyTheme(next);
+  api.saveSettings({ ...state.settings, theme: next }).catch(() => {});
+});
+
 // ------------------------------------------------------------ actions
 
 $('#btn-probe').addEventListener('click', () => api.probeNow());
@@ -567,6 +617,7 @@ function openSettings() {
   form.openAtLogin.checked = s.openAtLogin;
   form.openAtLogin.closest('label').hidden = !!api.web; // not meaningful in a browser
   form.autoUpdate.checked = s.autoUpdate;
+  form.theme.value = s.theme;
   form.autoUpdate.closest('label').hidden = !!api.web;
   $('#version-hint').textContent = state.version ? `Version ${state.version}${state.update?.status === 'error' ? ' · last update check failed' : ''}` : '';
   form.serverEnabled.checked = s.server.enabled;
@@ -614,6 +665,7 @@ form.addEventListener('submit', async (e) => {
     thresholds: { loss: num('t.loss'), latency: num('t.latency'), jitter: num('t.jitter'), dnsLatency: num('t.dnsLatency') },
     openAtLogin: form.openAtLogin.checked,
     autoUpdate: form.autoUpdate.checked,
+    theme: form.theme.value,
     server: {
       enabled: form.serverEnabled.checked,
       port: num('serverPort'),
@@ -746,6 +798,7 @@ welcome.addEventListener('cancel', (e) => {
 
 function onState(next) {
   state = next;
+  applyTheme(state.settings.theme);
   renderState();
   if (welcome.open) renderWelcomeConnection();
   else maybeWelcome();

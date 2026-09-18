@@ -28,6 +28,13 @@ test('defaults mirror the original .env', () => {
   assert.ok(Math.abs(weightSum - 1) < 1e-9);
 });
 
+test('start at login, notifications and automatic speed tests are off by default', () => {
+  const d = defaults();
+  assert.strictEqual(d.openAtLogin, false);
+  assert.strictEqual(d.alerts.notify, false);
+  assert.strictEqual(d.speedtestEnabled, false);
+});
+
 test('defaults include exactly one home DNS server', () => {
   const home = defaults().dnsServers.filter((s) => s.home);
   assert.strictEqual(home.length, 1);
@@ -147,7 +154,7 @@ test('home DNS servers follow the network by default, others never do', () => {
 });
 
 test('alert settings have defaults and are clamped', () => {
-  assert.deepStrictEqual(defaults().alerts, { notify: true, degradedScore: 0.6, degradedLoss: 2 });
+  assert.deepStrictEqual(defaults().alerts, { notify: false, degradedScore: 0.6, degradedLoss: 2 });
   const s = validate({ ...defaults(), alerts: { notify: 0, degradedScore: 5, degradedLoss: -1 } });
   assert.deepStrictEqual(s.alerts, { notify: false, degradedScore: 1, degradedLoss: 0.1 });
 });
@@ -233,4 +240,11 @@ test('set keeps fields the update does not mention (regression: welcome reappear
   assert.strictEqual(saved.planDown, 500);
   assert.deepStrictEqual({ ...saved.server, token: undefined }, { enabled: true, port: 8000, lan: true, token: undefined });
   assert.strictEqual(saved.probeInterval, 60);
+});
+
+test('theme defaults to the system and only accepts light or dark otherwise', () => {
+  assert.strictEqual(defaults().theme, 'system');
+  assert.strictEqual(validate({ ...defaults(), theme: 'dark' }).theme, 'dark');
+  assert.strictEqual(validate({ ...defaults(), theme: 'light' }).theme, 'light');
+  assert.strictEqual(validate({ ...defaults(), theme: 'purple' }).theme, 'system');
 });
