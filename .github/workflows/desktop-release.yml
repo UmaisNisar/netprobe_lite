@@ -1,12 +1,12 @@
 name: Desktop app release
 
 # Builds Netprobe Desktop for Windows, macOS (Apple Silicon + Intel) and Linux.
-# Push a tag like v1.0.0 to build and publish a GitHub Release, or run it
+# Push a tag like desktop-v1.0.0 to build and publish a GitHub Release, or run it
 # manually from the Actions tab to just get the build artifacts.
 
 on:
   push:
-    tags: ['v*']
+    tags: ['desktop-v*']
   workflow_dispatch:
 
 permissions:
@@ -60,7 +60,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
     needs: build
     runs-on: ubuntu-latest
     steps:

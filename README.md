@@ -142,7 +142,7 @@ npm run dist:linux   # -> dist/Netprobe-linux.AppImage
 `.dmg` files can only be built on a Mac. That's handled by GitHub Actions: pushing a tag builds every platform and publishes a release.
 
 ```sh
-git tag v1.0.1 && git push origin v1.0.1
+git tag desktop-v1.0.1 && git push origin desktop-v1.0.1
 ```
 
 See [.github/workflows/desktop-release.yml](.github/workflows/desktop-release.yml).
